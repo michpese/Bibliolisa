@@ -17,7 +17,8 @@ tmp-*
 *.sqlite-shm
 coverage
 *.log
-mobile
+mobile/**
+!mobile/package.json
 docs
 scripts
 LICENSE

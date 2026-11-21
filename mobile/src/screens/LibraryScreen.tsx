@@ -26,6 +26,7 @@ import {
 } from '@bibliolisa/shared';
 import { BookCoverImage } from '../components/BookCoverImage';
 import { RatingStars } from '../components/RatingStars';
+import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import { useAppContext } from '../context/AppContext';
 import {
   getLocalLibraryFacets,
@@ -34,6 +35,7 @@ import {
 } from '../db/library.repo';
 import type { LocalLibraryEntry } from '../db/types';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
+import { useSyncContext } from '../sync/sync-context';
 import { useAppTheme } from '../theme';
 import {
   formatAuthors,
@@ -54,12 +56,14 @@ export function LibraryScreen() {
   const {
     db,
     userId,
+    isAuthenticated,
     libraryVersion,
     pendingChangesCount,
     lastDeleted,
     undoLastDelete,
     dismissUndoBanner,
   } = useAppContext();
+  const { snapshot: syncSnapshot, syncNow } = useSyncContext();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<ReadingStatus | undefined>(undefined);
@@ -126,6 +130,9 @@ export function LibraryScreen() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
+      if (isAuthenticated) {
+        await syncNow('pull_to_refresh');
+      }
       await loadData();
     } finally {
       setRefreshing(false);
@@ -157,7 +164,7 @@ export function LibraryScreen() {
     >
       {/* Kopfzeile */}
       <View style={styles.topHeader}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.screenTitle, { color: theme.text }]}>
             Bibliolisa
           </Text>
@@ -168,18 +175,76 @@ export function LibraryScreen() {
               : ' · Offline bereit'}
           </Text>
         </View>
+        <View style={styles.headerActions}>
+          <SyncStatusBadge
+            compact
+            onOpenSettings={() => navigation.navigate('SettingsTab')}
+          />
+          <Pressable
+            onPress={() => navigation.navigate('AddBookTab')}
+            style={[styles.headerAddBtn, { backgroundColor: theme.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Buch hinzufügen"
+          >
+            <Ionicons name="add" size={20} color={theme.primaryText} />
+            <Text style={[styles.headerAddBtnText, { color: theme.primaryText }]}>
+              Neu
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {(syncSnapshot.status === 'auth_required' ||
+        syncSnapshot.status === 'error') && (
         <Pressable
-          onPress={() => navigation.navigate('AddBookTab')}
-          style={[styles.headerAddBtn, { backgroundColor: theme.primary }]}
-          accessibilityRole="button"
-          accessibilityLabel="Buch hinzufügen"
+          onPress={() => {
+            if (syncSnapshot.status === 'auth_required') {
+              navigation.navigate('SettingsTab');
+            } else {
+              void syncNow('manual');
+            }
+          }}
+          style={[
+            styles.syncAlertBanner,
+            {
+              backgroundColor:
+                syncSnapshot.status === 'auth_required'
+                  ? theme.warningSoft
+                  : theme.dangerSoft,
+            },
+          ]}
         >
-          <Ionicons name="add" size={20} color={theme.primaryText} />
-          <Text style={[styles.headerAddBtnText, { color: theme.primaryText }]}>
-            Neu
+          <Ionicons
+            name={
+              syncSnapshot.status === 'auth_required'
+                ? 'lock-closed-outline'
+                : 'warning-outline'
+            }
+            size={16}
+            color={
+              syncSnapshot.status === 'auth_required'
+                ? theme.warning
+                : theme.danger
+            }
+          />
+          <Text
+            numberOfLines={2}
+            style={[
+              styles.syncAlertText,
+              {
+                color:
+                  syncSnapshot.status === 'auth_required'
+                    ? theme.warning
+                    : theme.danger,
+              },
+            ]}
+          >
+            {syncSnapshot.status === 'auth_required'
+              ? 'Anmeldung abgelaufen – Tippen zum erneuten Anmelden (lokale Daten bleiben erhalten).'
+              : `Sync-Fehler: ${syncSnapshot.lastSyncError ?? 'Unbekannt'} · Tippen zum Wiederholen.`}
           </Text>
         </Pressable>
-      </View>
+      )}
 
       {/* Suchfeld */}
       <View
@@ -779,9 +844,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 10,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  syncAlertBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  syncAlertText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
   },
   screenTitle: {
     fontSize: 24,

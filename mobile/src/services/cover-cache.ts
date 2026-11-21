@@ -1,4 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import { CoverKeySchema } from '@bibliolisa/shared';
+import { normalizeServerUrl } from '../sync/health-check';
 
 const COVERS_FOLDER_NAME = 'covers';
 
@@ -59,6 +61,78 @@ export async function cacheExternalCoverPreview(
     return downloaded.uri;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Prüft, ob ein gecachtes WebP-Cover für einen Server-Cover-Key bereits lokal vorliegt.
+ */
+export function getCachedCoverUri(coverKey: string): string | null {
+  const parsed = CoverKeySchema.safeParse(coverKey);
+  if (!parsed.success) {
+    return null;
+  }
+  const file = new File(getCoversDirectory(), parsed.data);
+  if (file.exists && file.size > 0) {
+    return file.uri;
+  }
+  return null;
+}
+
+/**
+ * Lädt ein Cover authentifiziert (Authorization: Bearer) atomar über eine temporäre Datei
+ * in Paths.document/covers/<coverKey> herunter.
+ */
+export async function downloadCachedCover(params: {
+  serverUrl: string;
+  coverKey: string;
+  accessToken: string;
+}): Promise<string> {
+  const validKey = CoverKeySchema.parse(params.coverKey);
+  const normalized = normalizeServerUrl(params.serverUrl);
+  if (!normalized.ok) {
+    throw new Error(normalized.message);
+  }
+
+  const dir = ensureCoversDirectory();
+  const destination = new File(dir, validKey);
+  if (destination.exists && destination.size > 0) {
+    return destination.uri;
+  }
+
+  const tmpName = `${validKey}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tmpFile = new File(dir, tmpName);
+
+  try {
+    await File.downloadFileAsync(
+      `${normalized.url}/api/covers/${encodeURIComponent(validKey)}`,
+      tmpFile,
+      {
+        headers: {
+          Authorization: `Bearer ${params.accessToken}`,
+        },
+        idempotent: true,
+      }
+    );
+
+    if (!tmpFile.exists || tmpFile.size === 0) {
+      throw new Error('Heruntergeladene Cover-Datei ist leer.');
+    }
+
+    if (destination.exists) {
+      destination.delete();
+    }
+    tmpFile.move(destination);
+    return destination.uri;
+  } catch (error) {
+    try {
+      if (tmpFile.exists) {
+        tmpFile.delete();
+      }
+    } catch {
+      // Aufräumen der temporären Datei ist Best-Effort
+    }
+    throw error;
   }
 }
 

@@ -149,6 +149,11 @@ export function BookDetailScreen() {
     try {
       let nextCoverLocalUri: string | null | undefined = undefined;
       let nextCoverPendingUpload: boolean | undefined = undefined;
+      const coverCleared =
+        !payload.coverPickedNew &&
+        payload.coverLocalUri === null &&
+        !payload.book.coverSourceUrl &&
+        (entry.coverLocalUri !== null || entry.book.coverKey !== null);
 
       if (payload.coverPickedNew && payload.coverLocalUri) {
         nextCoverLocalUri = await saveLocalCover(
@@ -156,10 +161,7 @@ export function BookDetailScreen() {
           entry.bookId
         );
         nextCoverPendingUpload = true;
-      } else if (
-        payload.coverLocalUri === null &&
-        entry.coverLocalUri !== null
-      ) {
+      } else if (coverCleared) {
         nextCoverLocalUri = null;
         nextCoverPendingUpload = false;
       }
@@ -168,7 +170,11 @@ export function BookDetailScreen() {
         db,
         userId,
         entry.id,
-        { book: payload.book },
+        {
+          book: coverCleared
+            ? { ...payload.book, coverKey: null }
+            : payload.book,
+        },
         {
           coverLocalUri: nextCoverLocalUri,
           coverPendingUpload: nextCoverPendingUpload,
@@ -268,6 +274,11 @@ export function BookDetailScreen() {
           {entry.isDirty && (
             <Text style={[styles.dirtyTag, { color: theme.warning }]}>
               ● Lokal geändert (offline gespeichert)
+            </Text>
+          )}
+          {entry.coverPendingUpload && (
+            <Text style={[styles.dirtyTag, { color: theme.warning }]}>
+              ● Cover wartet auf Upload
             </Text>
           )}
         </View>

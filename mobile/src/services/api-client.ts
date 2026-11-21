@@ -3,12 +3,17 @@ import {
   ApiErrorResponseSchema,
   AuthTokenResponseSchema,
   AuthUserSchema,
+  BookCoverResponseSchema,
   MetadataIsbnResponseSchema,
   MetadataSearchResponseSchema,
+  SyncResponseSchema,
   type AuthTokenResponse,
   type AuthUser,
+  type BookCoverResponse,
   type MetadataIsbnResponse,
   type MetadataSearchResponse,
+  type SyncRequest,
+  type SyncResponse,
 } from '@bibliolisa/shared';
 import { normalizeServerUrl } from '../sync/health-check';
 import {
@@ -31,6 +36,24 @@ export class MobileApiError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+export function isAuthError(error: unknown): boolean {
+  return (
+    error instanceof MobileApiError &&
+    (error.status === 401 ||
+      error.code === 'AUTH_REQUIRED' ||
+      error.code === 'SESSION_EXPIRED')
+  );
+}
+
+export function isNetworkError(error: unknown): boolean {
+  return (
+    error instanceof MobileApiError &&
+    (error.code === 'TIMEOUT' ||
+      error.code === 'NETWORK_ERROR' ||
+      (error.status === 0 && error.code !== 'INVALID_SERVER_URL'))
+  );
 }
 
 let refreshInFlight: Promise<StoredAuthTokens | null> | null = null;
@@ -167,7 +190,11 @@ export async function refreshMobileTokens(
   return refreshInFlight;
 }
 
-async function ensureFreshAccessToken(serverUrl: string): Promise<string> {
+/**
+ * Stellt ein noch mindestens 60 Sekunden gültiges Access Token bereit (rotiert bei Bedarf).
+ */
+export async function ensureFreshAccessToken(serverUrl: string): Promise<string> {
+  const baseUrl = requireNormalizedBaseUrl(serverUrl);
   const current = await getAuthTokens();
   if (!current) {
     throw new MobileApiError(
@@ -181,7 +208,7 @@ async function ensureFreshAccessToken(serverUrl: string): Promise<string> {
     return current.accessToken;
   }
 
-  const refreshed = await refreshMobileTokens(serverUrl);
+  const refreshed = await refreshMobileTokens(baseUrl);
   if (!refreshed) {
     throw new MobileApiError(
       401,
@@ -380,5 +407,120 @@ export async function searchMetadata(
     `/api/metadata/search?${params.toString()}`,
     (json) => MetadataSearchResponseSchema.parse(json),
     { timeoutMs: 7000, signal }
+  );
+}
+
+/**
+ * Führt einen atomaren Delta-Sync (Push + Pull) gegen POST /api/sync aus.
+ */
+export async function syncWithServer(
+  serverUrl: string,
+  payload: SyncRequest,
+  options: { signal?: AbortSignal } = {}
+): Promise<SyncResponse> {
+  return authenticatedRequest(
+    serverUrl,
+    '/api/sync',
+    (json) => SyncResponseSchema.parse(json),
+    {
+      method: 'POST',
+      body: payload,
+      deviceId: payload.deviceId,
+      timeoutMs: 15000,
+      signal: options.signal,
+    }
+  );
+}
+
+function resolveCoverUploadMeta(localUri: string): {
+  name: string;
+  type: 'image/png' | 'image/webp' | 'image/jpeg';
+} {
+  const clean = localUri.split('?')[0]?.split('#')[0]?.toLowerCase() ?? '';
+  if (clean.endsWith('.png')) {
+    return { name: 'cover.png', type: 'image/png' };
+  }
+  if (clean.endsWith('.webp')) {
+    return { name: 'cover.webp', type: 'image/webp' };
+  }
+  return { name: 'cover.jpg', type: 'image/jpeg' };
+}
+
+/**
+ * Lädt ein offline ausgewähltes/fotografiertes Cover per Multipart-FormData auf den Server hoch.
+ */
+export async function uploadBookCover(
+  serverUrl: string,
+  bookId: string,
+  localUri: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<BookCoverResponse> {
+  const baseUrl = requireNormalizedBaseUrl(serverUrl);
+  let token = await ensureFreshAccessToken(baseUrl);
+  const { name, type } = resolveCoverUploadMeta(localUri);
+
+  const send = async (bearer: string) => {
+    const form = new FormData();
+    form.append('file', {
+      uri: localUri,
+      name,
+      type,
+    } as unknown as Blob);
+
+    return fetchWithTimeout(
+      `${baseUrl}/api/books/${encodeURIComponent(bookId)}/cover`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${bearer}`,
+        },
+        body: form,
+      },
+      20000,
+      options.signal
+    );
+  };
+
+  let response = await send(token);
+  if (response.status === 401) {
+    const refreshed = await refreshMobileTokens(baseUrl);
+    if (!refreshed) {
+      throw new MobileApiError(
+        401,
+        'SESSION_EXPIRED',
+        'Anmeldung abgelaufen – bitte erneut anmelden.'
+      );
+    }
+    token = refreshed.accessToken;
+    response = await send(token);
+  }
+
+  if (!response.ok) {
+    throw await parseErrorResponse(response);
+  }
+
+  return BookCoverResponseSchema.parse(await response.json());
+}
+
+/**
+ * Stößt serverseitig das SSRF-geschützte Herunterladen & WebP-Caching eines externen Covers an.
+ */
+export async function fetchBookCoverOnServer(
+  serverUrl: string,
+  bookId: string,
+  url: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<BookCoverResponse> {
+  return authenticatedRequest(
+    serverUrl,
+    `/api/books/${encodeURIComponent(bookId)}/cover/fetch`,
+    (json) => BookCoverResponseSchema.parse(json),
+    {
+      method: 'POST',
+      body: { url },
+      timeoutMs: 15000,
+      signal: options.signal,
+    }
   );
 }

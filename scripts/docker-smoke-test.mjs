@@ -14,7 +14,7 @@
  * Optional: SMOKE_IMAGE=bibliolisa:local  SMOKE_PORT=38080  SMOKE_SKIP_BUILD=1
  */
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -199,6 +199,8 @@ async function main() {
       body: JSON.stringify({ ...credentials, username: 'smokeuser2' }),
     });
     const directRefresh = parseSetCookies(direct).get('bibliolisa_refresh');
+    const reg2Body = await direct.json();
+    const token2 = reg2Body.accessToken;
     check('Direkter HTTP-Zugriff (LAN) -> Cookie ohne Secure-Flag', direct.status === 201 && directRefresh && !hasFlag(directRefresh.raw, 'Secure'), directRefresh?.raw);
 
     // --- Buch + Cover ----------------------------------------------------------
@@ -234,6 +236,214 @@ async function main() {
     check('Cover-Datei liegt im gemounteten Host-Verzeichnis (covers/)', coverFileOnHost);
     check('SQLite-Datei liegt im gemounteten Host-Verzeichnis', fs.existsSync(path.join(dataDir, 'bibliolisa.sqlite')));
 
+    // --- Phase 5: Mobile Auth, Bearer-Cover, Delta-Sync, LWW-Konflikt & 2-User-Isolation ---
+    const mobileLogin = await fetch(`${BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: credentials.username,
+        password: credentials.password,
+        clientType: 'mobile',
+        deviceId: 'smoke-android-1',
+        deviceName: 'Smoke Android',
+      }),
+    });
+    const mobileLoginBody = await mobileLogin.json();
+    check(
+      'Mobiler Login -> 200 mit accessToken & refreshToken',
+      mobileLogin.status === 200 && Boolean(mobileLoginBody.accessToken) && Boolean(mobileLoginBody.refreshToken),
+      `${mobileLogin.status}`
+    );
+
+    const mobileRefresh = await fetch(`${BASE}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken: mobileLoginBody.refreshToken, clientType: 'mobile' }),
+    });
+    const mobileRefreshed = await mobileRefresh.json();
+    const mobileToken = mobileRefreshed.accessToken;
+    check(
+      'Mobile Refresh-Token-Rotation -> 200 mit neuem Token-Paar',
+      mobileRefresh.status === 200 &&
+        Boolean(mobileToken) &&
+        Boolean(mobileRefreshed.refreshToken) &&
+        mobileRefreshed.refreshToken !== mobileLoginBody.refreshToken,
+      `${mobileRefresh.status}`
+    );
+
+    const mobileBearerCover = await fetch(`${BASE}/api/covers/${coverKey}`, {
+      headers: { authorization: `Bearer ${mobileToken}` },
+    });
+    check(
+      'Cover-Download per Bearer-Auth (Android) -> 200 image/webp',
+      mobileBearerCover.status === 200 &&
+        (mobileBearerCover.headers.get('content-type') ?? '').includes('image/webp'),
+      `${mobileBearerCover.status}`
+    );
+
+    const tInitial = new Date(Date.now() - 10_000).toISOString();
+    const tStale = new Date(Date.now() - 5_000).toISOString();
+    const syncBookId = randomUUID();
+    const syncUbId = randomUUID();
+
+    const syncRes1 = await fetch(`${BASE}/api/sync`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${mobileToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'smoke-android-1',
+        cursor: null,
+        clientTime: new Date().toISOString(),
+        limit: 100,
+        changes: {
+          books: [
+            {
+              id: syncBookId,
+              title: 'Sync-Test-Buch',
+              subtitle: null,
+              authors: ['Mobile Tester'],
+              seriesName: 'Smoke',
+              seriesNumber: 2.5,
+              isbn10: null,
+              isbn13: null,
+              pageCount: 280,
+              publishedYear: 2026,
+              genres: ['Science-Fiction'],
+              description: null,
+              coverKey: null,
+              coverSourceUrl: null,
+              language: 'de',
+              publisher: null,
+              metadataSource: 'manual',
+              metadataExternalId: null,
+              createdAt: tInitial,
+              updatedAt: tInitial,
+              deletedAt: null,
+            },
+          ],
+          userBooks: [
+            {
+              id: syncUbId,
+              bookId: syncBookId,
+              status: 'unread',
+              rating: null,
+              notes: 'Offline erfasst',
+              addedAt: tInitial,
+              startedAt: null,
+              finishedAt: null,
+              createdAt: tInitial,
+              updatedAt: tInitial,
+              deletedAt: null,
+            },
+          ],
+        },
+      }),
+    });
+    const syncBody1 = await syncRes1.json();
+    check(
+      'Delta-Sync Push + Pull -> 200 (Offline-Buch akzeptiert, Web-Buch gepullt)',
+      syncRes1.status === 200 &&
+        syncBody1.pushResults?.books?.[0]?.status === 'accepted' &&
+        syncBody1.pushResults?.userBooks?.[0]?.status === 'accepted' &&
+        syncBody1.pull?.books?.some((b) => b.id === entry.bookId),
+      `${syncRes1.status}`
+    );
+
+    const webLibSeries = await (
+      await fetch(`${BASE}/api/library?sort=series&order=asc`, { headers: authHeaders })
+    ).json();
+    const seriesNums = (webLibSeries.items ?? []).map((item) => item.book?.seriesNumber);
+    check(
+      'Web-API sieht gepushtes Mobile-Buch in korrekter Reihen-Sortierung [1.5, 2.5]',
+      seriesNums.length === 2 && seriesNums[0] === 1.5 && seriesNums[1] === 2.5,
+      JSON.stringify(seriesNums)
+    );
+
+    // Neuerer Edit in der Web-UI -> älterer Push von Android muss conflict_server_won liefern
+    const webPatch = await fetch(`${BASE}/api/library/${syncUbId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'read', rating: 5, notes: 'Web-Sieger' }),
+    });
+    check('Web-Update auf gesynctes Buch -> 200', webPatch.status === 200, `${webPatch.status}`);
+
+    const syncConflict = await fetch(`${BASE}/api/sync`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${mobileToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'smoke-android-1',
+        cursor: syncBody1.nextCursor,
+        clientTime: new Date().toISOString(),
+        limit: 100,
+        changes: {
+          books: [],
+          userBooks: [
+            {
+              id: syncUbId,
+              bookId: syncBookId,
+              status: 'abandoned',
+              rating: 2,
+              notes: 'Veralteter Offline-Edit',
+              addedAt: tInitial,
+              startedAt: null,
+              finishedAt: null,
+              createdAt: tInitial,
+              updatedAt: tStale,
+              deletedAt: null,
+            },
+          ],
+        },
+      }),
+    });
+    const syncConflictBody = await syncConflict.json();
+    check(
+      'LWW-Konflikt -> conflict_server_won + autoritativer Web-Stand im Pull',
+      syncConflict.status === 200 &&
+        syncConflictBody.pushResults?.userBooks?.[0]?.status === 'conflict_server_won' &&
+        syncConflictBody.pull?.userBooks?.some(
+          (ub) => ub.id === syncUbId && ub.notes === 'Web-Sieger' && ub.status === 'read'
+        ),
+      JSON.stringify(syncConflictBody.pushResults)
+    );
+
+    // 2-User-Isolation im Sync
+    const user2Sync = await fetch(`${BASE}/api/sync`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token2}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'smoke-android-user2',
+        cursor: null,
+        clientTime: new Date().toISOString(),
+        limit: 100,
+        changes: {
+          books: [],
+          userBooks: [
+            {
+              id: syncUbId,
+              bookId: syncBookId,
+              status: 'reading',
+              rating: 1,
+              notes: 'Cross-User Versuch',
+              addedAt: tInitial,
+              startedAt: null,
+              finishedAt: null,
+              createdAt: tInitial,
+              updatedAt: new Date().toISOString(),
+              deletedAt: null,
+            },
+          ],
+        },
+      }),
+    });
+    const user2SyncBody = await user2Sync.json();
+    check(
+      '2-User-Isolation im Sync -> User 2 pullt 0 fremde Bücher & Cross-User-Push rejected',
+      user2Sync.status === 200 &&
+        user2SyncBody.pull?.books?.length === 0 &&
+        user2SyncBody.pull?.userBooks?.length === 0 &&
+        user2SyncBody.pushResults?.userBooks?.[0]?.status === 'rejected',
+      JSON.stringify(user2SyncBody)
+    );
+
     // --- Neustart: Persistenz ----------------------------------------------------
     console.log('== Container neu starten');
     docker(['restart', NAME]);
@@ -246,10 +456,20 @@ async function main() {
     });
     check('Login nach Neustart (Benutzer persistiert)', login.status === 200, `${login.status}`);
     const loginBody = await login.json();
-    const libraryAfter = await fetch(`${BASE}/api/library`, { headers: { authorization: `Bearer ${loginBody.accessToken}` } });
+    const libraryAfter = await fetch(`${BASE}/api/library?sort=series&order=asc`, {
+      headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    });
     const libraryJson = await libraryAfter.json();
     const persisted = libraryJson.items?.find((item) => item.book?.title === 'Smoke-Test-Buch');
+    const persistedSynced = libraryJson.items?.find((item) => item.book?.title === 'Sync-Test-Buch');
     check('Buch, Bewertung und Reihe nach Neustart vorhanden', persisted && persisted.rating === 4 && persisted.book.seriesNumber === 1.5);
+    check(
+      'Per Sync erfasstes Buch (Band 2,5) & LWW-Siegerstand nach Neustart erhalten',
+      persistedSynced &&
+        persistedSynced.book.seriesNumber === 2.5 &&
+        persistedSynced.status === 'read' &&
+        persistedSynced.notes === 'Web-Sieger'
+    );
     check('Cover-Key nach Neustart am Buch vorhanden', persisted?.book?.coverKey === coverKey);
     const loginMedia = parseSetCookies(login).get('bibliolisa_media');
     const coverAfter = await fetch(`${BASE}/api/covers/${coverKey}`, { headers: { cookie: `bibliolisa_media=${loginMedia?.value ?? ''}` } });

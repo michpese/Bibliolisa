@@ -81,6 +81,27 @@ export function formatDateTime(iso: string | null | undefined): string {
 }
 
 /**
+ * Formatiert den letzten Sync-Zeitpunkt als kompakten relativen deutschen Text.
+ */
+export function formatRelativeSyncTime(
+  iso: string | null | undefined,
+  nowMs = Date.now()
+): string {
+  if (!iso) return 'Noch nie';
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return 'Noch nie';
+  const diffSec = Math.max(0, Math.floor((nowMs - ts) / 1000));
+  if (diffSec < 45) return 'Gerade eben';
+  if (diffSec < 3600) {
+    return `Vor ${Math.max(1, Math.round(diffSec / 60))} Min.`;
+  }
+  if (diffSec < 86400) {
+    return `Vor ${Math.round(diffSec / 3600)} Std.`;
+  }
+  return `Vor ${Math.round(diffSec / 86400)} Tg.`;
+}
+
+/**
  * Konvertiert Eingaben wie "1,5" oder "1.5" in number | null (undefined = ungültig).
  */
 export function parseDecimal(input: string): number | null | undefined {

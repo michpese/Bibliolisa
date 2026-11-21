@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "de.bibliolisa.mobile",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#4f46e5"

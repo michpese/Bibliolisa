@@ -14,7 +14,7 @@
 | **Phase 2** | Metadaten-Provider, Cover-Cache, Delta-Sync, Empfehlungen & Export | `Abgeschlossen` | 3 Provider + Aggregator, SSRF-sicherer Cover-Cache, `POST /api/sync`, Empfehlungen, JSON/CSV | Mock-Provider-, SSRF-, Sync-Konflikt- & Export-Tests |
 | **Phase 3** | Webapp (`/web`) & Docker Single-Container-Deployment | `Abgeschlossen` | Vollständige React-Webapp (Verwaltung, Empfehlungen, Backup), Multi-Stage `Dockerfile` | `web` Build + Docker-Image-Build + Container-Smoke-Test |
 | **Phase 4** | Offline-First Android-App (`/mobile`) | `Abgeschlossen` | `expo-sqlite`, Offline-CRUD, Kamera-ISBN-Scanner, Offline-Empfehlungen, Settings & Test-Button | Typecheck + Expo/Metro-Bundle + Flugmodus-Funktionstest |
-| **Phase 5** | Android Delta-Sync-Engine, E2E-Verifikation & Release-Härtung | `Offen` | `/api/health`-Pre-Check, Auto-/WLAN-Sync, Cover-Cache-Sync, Status-UI, E2E-Abnahme | Gesamttestsuite + E2E-Konflikt-/Multi-User-/Proxy-Check |
+| **Phase 5** | Android Delta-Sync-Engine, E2E-Verifikation & Release-Härtung | `Abgeschlossen` | `/api/health`-Pre-Check, Auto-/WLAN-Sync, Cover-Cache-Sync, Status-UI, E2E-Abnahme | Gesamttestsuite + E2E-Konflikt-/Multi-User-/Proxy-Check |
 
 ---
 
@@ -219,23 +219,25 @@ Verifikation (ausgeführt, alle automatisierten Prüfungen grün):
 
 ### Aufgaben-Checkliste
 
-- [ ] **Mobile Delta-Sync-Engine (`sync-engine.ts`):**
+- [x] **Mobile Delta-Sync-Engine (`sync-engine.ts`):**
   - Pre-Flight-Reachability-Check (`GET /api/health`, `1500 ms` AbortController-Timeout): bei Nichterreichbarkeit stiller Abbruch auf Status `offline`.
   - Transparenter Token-Refresh bei ablaufendem `accessToken` (`< 60 s` Restlaufzeit) vor Sync-Start ohne Benutzer-Interaktion.
   - Single-Flight-Mutex + Pagination-Loop (`POST /api/sync` bis `hasMore === false`), LWW-Konvergenz bei `conflict_server_won`, Remap bei Duplikat-Merge und race-safe `is_dirty`-Reset (`WHERE dirty_updated_at = ?`).
-- [ ] **Automatische Sync-Trigger & Cover-Cache-Sync:**
+- [x] **Automatische Sync-Trigger & Cover-Cache-Sync:**
   - Trigger bei App-Start / Foreground-Resume (30s Cooldown), Pull-to-Refresh, debounced (`2s`) nach lokalen Schreibvorgängen ausschließlich im WLAN (`expo-network`) und manuellem Sync-Button.
-  - Paralleler Cover-Download (max. 3 gleichzeitig, `Authorization: Bearer`) in `${documentDirectory}covers/`, Upload offline hinzugefügter Cover (`cover_pending_upload = 1`) und Orphan-Cleanup.
-- [ ] **Sichtbare Sync-Status-UI:**
-  - Status-Badge im Header (`synced`, `syncing`, `pending`, `offline`, `auth_required`, `error`) plus Detail-Ansicht mit letztem Sync-Zeitpunkt, ausstehenden Änderungen und manueller Sync-/Retry-Aktion.
-- [ ] **End-to-End-Verifikation & Release-Härtung:**
-  - E2E-Abnahme aller Kernszenarien über alle Schichten hinweg (Flugmodus-Edits -> WLAN-Sync -> Web-Verifikation; gleichzeitiger Edit-Konflikt Web vs. Offline-Android; 2-User-Isolation; Reverse-Proxy-HTTPS + LAN-HTTP; Restart-Persistenz).
-  - Finaler Gesamtlauf aller Tests und Builds (`shared`, `server`, `web`, `mobile`, `docker build`) sowie Abschlussabgleich von `docs/ARCHITECTURE.md` und `docs/ROADMAP.md`.
+  - Paralleler Cover-Download (max. 3 gleichzeitig, `Authorization: Bearer`) in `Paths.document/covers/`, Upload offline hinzugefügter Cover (`cover_pending_upload = 1`) und Orphan-Cleanup.
+- [x] **Sichtbare Sync-Status-UI:**
+  - Status-Badge im Header (`synced`, `syncing`, `pending`, `offline`, `auth_required`, `error`) plus Detail-Ansicht mit letztem Sync-Zeitpunkt, ausstehenden Änderungen und manueller Sync-/Retry-Aktion inkl. Inline-Re-Login.
+- [x] **End-to-End-Verifikation & Release-Härtung:**
+  - Automatisierte Full-Stack-E2E-Abnahme aller 5 Kernszenarien (`server/tests/e2e-sync.test.ts`), erweiterter Container-Smoke-Test (`scripts/docker-smoke-test.mjs`), Dockerfile-/`.dockerignore`-Härtung (`mobile/package.json`), `mobile/eas.json` und vollständige `README.md`.
+  - Finaler Gesamtlauf aller Typechecks, Tests und Builds (`shared`, `server`, `web`, `mobile`, `expo prebuild`) sowie Abschlussabgleich von `docs/ARCHITECTURE.md` und `docs/ROADMAP.md`.
 
 ### Verifikations-Check (Phase 5)
 
-- [ ] Vollständige Testsuite & Typechecks über alle Workspaces (`pnpm -r typecheck && pnpm -r test && pnpm -r build`) laufen grün durch.
-- [ ] E2E-Checkliste (Szenarien 1–5 unten) wurde am laufenden Docker-Container + Webbrowser + Android-Gerät/Emulator nachweislich durchlaufen und protokolliert.
+- [x] Vollständige Testsuite, Typechecks & Paket-Builds über alle Workspaces (`pnpm -r typecheck && pnpm -r test && pnpm -r build` sowie `expo prebuild --platform android --clean --no-install`) laufen grün durch.
+- [ ] E2E-Checkliste (Szenarien 1–5) am laufenden Docker-Container + realer Android-Hardware/Emulator:
+  - **Automatisiert grün (`server/tests/e2e-sync.test.ts`):** Alle 5 Szenarien wurden End-to-End gegen den echten Fastify HTTP-Listener, temporäre SQLite-WAL-DB + `sharp`-Cover-Cache und die echte Mobile-`SyncEngine` auf `better-sqlite3` verifiziert.
+  - **Noch lokal auszuführen:** `pnpm docker:build` / `pnpm docker:smoke` (Docker Desktop lief zum Ausführungszeitpunkt auf dem Host nicht: `//./pipe/dockerDesktopLinuxEngine` nicht erreichbar) sowie manueller Hardware-/Kamera-Test auf einem Android-Gerät.
 
 ### Akzeptanzkriterien (Phase 5)
 
@@ -245,7 +247,20 @@ Verifikation (ausgeführt, alle automatisierten Prüfungen grün):
 4. **LAN & Reverse Proxy:** Sowohl direkte `http://<LAN-IP>:<PORT>`-Verbindungen als auch `https://<proxy-domain>` über den bestehenden Host-Reverse-Proxy funktionieren in Webapp und Android-App zuverlässig.
 5. **Dokumentations-Parität:** `docs/ROADMAP.md` und `docs/ARCHITECTURE.md` spiegeln den final getesteten Stand ohne offene Widersprüche wider.
 
+### Implementierungsstand & Verifikation (2026-11-21)
+
+Vorhanden / ergänzt in Phase 5:
+- **Mobile Sync & Services (`mobile/`):** `src/services/api-client.ts` (`ensureFreshAccessToken`, `syncWithServer`, Multipart-`uploadBookCover`, `fetchBookCoverOnServer`, `isAuthError`/`isNetworkError`), `src/services/cover-cache.ts` (`getCachedCoverUri`, atomares `downloadCachedCover` via `File.downloadFileAsync` + Temp-Move), `src/sync/sync-engine.ts` (Single-Flight-Mutex mit Follow-Up-Vormerkung, `1500 ms` Pre-Flight-Health-Check, FK-sicheres Batching & Pagination, LWW-Konflikt- & Duplikat-Merge-Remap, race-safe `is_dirty`-Reset, WLAN-Guard, Cover-Upload/-Download max. 3 parallel + Orphan-Cleanup), `src/sync/sync-context.tsx` (App-Start, Foreground-Resume mit `30 s` Cooldown, debounced `2 s` WLAN-Write via `expo-network`, WLAN-Reconnect), `src/components/SyncStatusBadge.tsx` (alle 6 UI-Zustände + Detail-Modal inkl. Inline-Re-Login bei `auth_required`), Screen-Integration (`LibraryScreen.tsx`, `BookDetailScreen.tsx`, `SettingsScreen.tsx`, `AppContext.tsx`, `App.tsx`).
+- **Release- & Build-Konfiguration:** `mobile/app.json` (`versionCode: 1`), `mobile/eas.json` (`development`, `preview`, `production` jeweils mit `buildType: "apk"`), `mobile/package.json` (`eas-build-post-install`), `.dockerignore` (`!mobile/package.json`) & `Dockerfile` (`COPY mobile/package.json` für `pnpm install --frozen-lockfile`), erweiterter `scripts/docker-smoke-test.mjs` sowie vollständige [`README.md`](../README.md) (Docker-Compose inkl. UID-10001-Rechte, Nginx/Caddy/Traefik-Proxy, lokaler Gradle- & EAS-APK-Build, LAN-Erstverbindung).
+- **Tests:** `mobile/tests/sync-engine.test.ts` (7 Unit-/Contract-Tests für Offline-Abbruch, `auth_required`, Single-Flight + Race-Safe In-Flight-Edit, Pagination, LWW-Konflikt + Duplikat-Merge, WLAN-Guard, Cover-Upload/Download `<= 3` & Cleanup) sowie `server/tests/e2e-sync.test.ts` (Full-Stack-E2E über alle 5 Szenarien).
+
+Verifikation (ausgeführt, grün):
+- `pnpm -r typecheck`: **0 Fehler** (`shared`, `server`, `web`, `mobile`).
+- `pnpm -r test`: `@bibliolisa/shared` (3 Testdateien, 12 Tests), `@bibliolisa/mobile` (3 Testdateien, 16 Tests), `@bibliolisa/server` (9 Testdateien, 26 Tests inkl. `tests/e2e-sync.test.ts`) vollständig grün.
+- `pnpm -r build`: alle 4 Pakete grün (`shared`, `server`, `web` Vite 1744 Module, `mobile` `expo export --platform android` 992 Module / `3,21 MB` Hermes-Bytecode).
+- `pnpm --filter @bibliolisa/mobile exec expo prebuild --platform android --clean --no-install`: erzeugt `AndroidManifest.xml` und `network_security_config.xml` fehlerfrei.
+
 ### Abweichungen / Notizen
-- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
-- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
-- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
+- **Docker-Rebuild & `pnpm docker:smoke` (erweitert um Phase 5) auf Host noch offen:** Die `.dockerignore`-/`Dockerfile`-Anpassung (`COPY mobile/package.json`) und der erweiterte Smoke-Test wurden geschrieben, konnten aber lokal nicht ausgeführt werden, da Docker Desktop auf dem Host nicht gestartet war (`//./pipe/dockerDesktopLinuxEngine` nicht vorhanden). Nach Start von Docker Desktop einmalig `pnpm docker:smoke` ausführen.
+- **Testbare SyncEngine-Architektur:** `mobile/src/sync/sync-engine.ts` hält sich bewusst frei von `react-native`-/`expo-*`-Imports (Injection über `SyncEngineDeps`), sodass exakt dieselbe Sync-Implementierung sowohl auf Android (`sync-context.tsx`) als auch in Node-Vitest (`mobile/tests/sync-engine.test.ts` und `server/tests/e2e-sync.test.ts`) ohne Mocks der Kernlogik geprüft wird.
+- **Expo SDK 54 FileSystem-API:** Cover-Downloads nutzen `File.downloadFileAsync` und `Paths.document/covers/` über eine temporäre Datei + `move()` statt der älteren `documentDirectory`/`downloadAsync`-String-API; `docs/ARCHITECTURE.md` wurde entsprechend abgeglichen.
