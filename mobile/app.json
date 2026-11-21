@@ -2,7 +2,7 @@
   "expo": {
     "name": "Bibliolisa",
     "slug": "bibliolisa",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -13,12 +13,15 @@
     },
     "android": {
       "package": "de.bibliolisa.mobile",
-      "versionCode": 1,
+      "versionCode": 20099,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#4f46e5"
       },
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ]
     },
     "plugins": [
       [

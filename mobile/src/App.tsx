@@ -10,7 +10,9 @@ import {
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { UpdateModal } from './components/UpdateModal';
 import { AppProvider, useAppContext } from './context/AppContext';
+import { UpdateProvider } from './context/UpdateContext';
 import type { MainTabParamList, RootStackParamList } from './navigation/types';
 import { AddBookScreen } from './screens/AddBookScreen';
 import { BookDetailScreen } from './screens/BookDetailScreen';
@@ -130,25 +132,28 @@ function AppShell() {
       };
 
   return (
-    <NavigationContainer theme={navTheme}>
-      <StatusBar style={theme.isDark ? 'light' : 'dark'} />
-      <Stack.Navigator>
-        <Stack.Screen
-          name="MainTabs"
-          component={MainTabs}
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen
-          name="BookDetail"
-          component={BookDetailScreen}
-          options={{
-            title: 'Buchdetails',
-            headerStyle: { backgroundColor: theme.card },
-            headerTintColor: theme.text,
-          }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer theme={navTheme}>
+        <StatusBar style={theme.isDark ? 'light' : 'dark'} />
+        <Stack.Navigator>
+          <Stack.Screen
+            name="MainTabs"
+            component={MainTabs}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="BookDetail"
+            component={BookDetailScreen}
+            options={{
+              title: 'Buchdetails',
+              headerStyle: { backgroundColor: theme.card },
+              headerTintColor: theme.text,
+            }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+      <UpdateModal />
+    </>
   );
 }
 
@@ -157,7 +162,9 @@ export default function App() {
     <SafeAreaProvider>
       <AppProvider>
         <SyncProvider>
-          <AppShell />
+          <UpdateProvider>
+            <AppShell />
+          </UpdateProvider>
         </SyncProvider>
       </AppProvider>
     </SafeAreaProvider>

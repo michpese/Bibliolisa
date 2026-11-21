@@ -264,3 +264,14 @@ Verifikation (ausgeführt, grün):
 - **Docker-Rebuild & `pnpm docker:smoke` (erweitert um Phase 5) auf Host noch offen:** Die `.dockerignore`-/`Dockerfile`-Anpassung (`COPY mobile/package.json`) und der erweiterte Smoke-Test wurden geschrieben, konnten aber lokal nicht ausgeführt werden, da Docker Desktop auf dem Host nicht gestartet war (`//./pipe/dockerDesktopLinuxEngine` nicht vorhanden). Nach Start von Docker Desktop einmalig `pnpm docker:smoke` ausführen.
 - **Testbare SyncEngine-Architektur:** `mobile/src/sync/sync-engine.ts` hält sich bewusst frei von `react-native`-/`expo-*`-Imports (Injection über `SyncEngineDeps`), sodass exakt dieselbe Sync-Implementierung sowohl auf Android (`sync-context.tsx`) als auch in Node-Vitest (`mobile/tests/sync-engine.test.ts` und `server/tests/e2e-sync.test.ts`) ohne Mocks der Kernlogik geprüft wird.
 - **Expo SDK 54 FileSystem-API:** Cover-Downloads nutzen `File.downloadFileAsync` und `Paths.document/covers/` über eine temporäre Datei + `move()` statt der älteren `documentDirectory`/`downloadAsync`-String-API; `docs/ARCHITECTURE.md` wurde entsprechend abgeglichen.
+
+---
+
+## Nach-Phase-5: Public-Release-Härtung & Android In-App-Updater (`v0.2.0`)
+
+- **Sicherheits- & Qualitäts-Härtung:** SSRF-Pinning mit TLS SNI im Server-Cover-Cache, konstante Login-Laufzeiten (`scrypt`), Rate-Limits für Refresh & Passwortwechsel, globale Security-Header + strenge CSP (`web/public/theme-init.js`), Import-Isolation & Schema-Limits sowie UX-/Bugfixes über `shared`, `server`, `web` und `mobile`.
+- **Android In-App-Updates (`mobile`):**
+  - Reine Update-/SemVer-/Changelog-Logik in `mobile/src/services/app-updater-utils.ts` (`parseSemver`, `compareSemver`, `checkForAppUpdate` gegen GitHub Releases mit ETag-Caching, URL-Whitelist, `formatReleaseNotesForDisplay`).
+  - Native Download- & Installer-Brücke in `mobile/src/services/app-updater.ts` (`expo-application`, `expo-file-system/legacy` Streaming-Download nach `Paths.cache/updates/`, Größen-/ZIP-Magic-Prüfung, `FileSystemFileProvider`-Content-URI via `expo-intent-launcher`).
+  - Automatische Startprüfung + manueller Update-Button in den Einstellungen (`UpdateContext.tsx`, `UpdateModal.tsx`, `SettingsScreen.tsx`) mit explizitem Hinweis und verifiziertem Erhalt aller Benutzerdaten (SQLite + Cover-Cache + `SecureStore`).
+- **Release- & Changelog-Pipeline:** `CHANGELOG.md` + `scripts/extract-changelog.mjs` binden Release-Highlights automatisch in `.github/workflows/android-release.yml` ein (Version `0.2.0` / `versionCode 20099`, `REQUEST_INSTALL_PACKAGES`).

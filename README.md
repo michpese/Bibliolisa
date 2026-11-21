@@ -12,7 +12,7 @@
 ## Funktionsumfang
 
 - **Strikt getrennte Benutzer-Indizes:** Gemeinsamer Metadaten- und Cover-Pool (`books`), strikt isolierter persönlicher Lese-Index pro Benutzer (`user_books` mit `status`, Bewertung `1–5`, Notizen, Lese-Daten, Soft Delete & Restore).
-- **Offline-First Android-App:** Vollständige lokale Bedienung in `expo-sqlite` ohne Serververbindung (Anlegen, Bearbeiten, Suche, Filter, Reihen-Sortierung inkl. Dezimalbänden wie `1, 1.5, 2, 10`, Offline-Empfehlungen, Kamera-ISBN-Scanner).
+- **Offline-First Android-App:** Vollständige lokale Bedienung in `expo-sqlite` ohne Serververbindung (Anlegen, Bearbeiten, Suche, Filter, Reihen-Sortierung inkl. Dezimalbänden wie `1, 1.5, 2, 10`, Offline-Empfehlungen, Kamera-ISBN-Scanner) inklusive direktem **In-App-Updater** über GitHub Releases unter Erhalt aller Benutzerdaten.
 - **Delta-Sync mit Last-Write-Wins (LWW):** Konfliktauflösung über UTC-`updated_at` (mit Clock-Skew-Schutz), lückenlose Pagination über monotonen `server_updated_at`-Cursor, automatischer WLAN-Sync (2 s Debounce), Pull-to-Refresh, Pre-Flight-Health-Check (`1,5 s`), transparenter Token-Refresh und paralleler WebP-Cover-Cache.
 - **Metadaten-Aggregation & SSRF-sicherer Cover-Cache:** Parallele Abfrage von **Open Library**, **Google Books** und optional **Hardcover.app** (`HARDCOVER_API_KEY`); Server-Cover-Cache skaliert & speichert Bilder als WebP unter `DATA_DIR/covers/`.
 - **Regelbasierte Empfehlungen („Was lese ich als Nächstes?“):** Identische Logik in Webapp, Server und Offline-Android-App via `@bibliolisa/shared` (begonnene Buchreihen fortsetzen, Autoren-/Genre-Affinität, Schnelle Reads `< 300` Seiten, Staubfänger, Überraschungs-Würfel).
@@ -61,7 +61,7 @@ Trage das Secret in `.env` ein und passe bei Bedarf die weiteren Variablen an:
 
 | Variable | Standard | Beschreibung |
 | :--- | :--- | :--- |
-| `BIBLIOLISA_IMAGE` | `ghcr.io/michpese/bibliolisa:latest` | Optionales Container-Image für `docker compose pull` (z. B. `:0.1.0` pinnen) |
+| `BIBLIOLISA_IMAGE` | `ghcr.io/michpese/bibliolisa:latest` | Optionales Container-Image für `docker compose pull` (z. B. `:0.2.0` pinnen) |
 | `JWT_SECRET` | *(Pflicht)* | Signierschlüssel für Access- und Media-Tokens (min. 32 Zeichen) |
 | `HOST_PORT` | `3000` | Host-Port, auf den Port `3000` des Containers gemappt wird (nie `80`/`443`) |
 | `HOST_BIND` | `0.0.0.0` | `0.0.0.0` für direkten LAN-Zugriff, `127.0.0.1` falls nur der lokale Host-Reverse-Proxy zugreifen darf |
@@ -102,7 +102,7 @@ Alternativ kann `./data:/data` in `docker-compose.yml` durch ein Named Volume (z
 docker compose pull && docker compose up -d
 ```
 
-Optional lässt sich in `.env` ein festes Release-Tag pinnen, z. B. `BIBLIOLISA_IMAGE=ghcr.io/michpese/bibliolisa:0.1.0`.
+Optional lässt sich in `.env` ein festes Release-Tag pinnen, z. B. `BIBLIOLISA_IMAGE=ghcr.io/michpese/bibliolisa:0.2.0`.
 
 **Variante 2 – Image lokal aus dem Quellcode bauen:**
 
@@ -122,7 +122,7 @@ Erwartete Antwort (`200 OK`):
 ```json
 {
   "status": "ok",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "serverTime": "...",
   "allowRegistration": true,
   "providers": {
@@ -333,6 +333,11 @@ In [`mobile/eas.json`](mobile/eas.json) sind bereits APK-Profile (`development`,
    - **Manuell:** Pull-to-Refresh in der Bibliothek oder über das Status-Badge in der Kopfzeile / **Einstellungen → Jetzt synchronisieren**.
    - **Status-Badge:** Zeigt jederzeit den aktuellen Zustand (`Synchron`, `Synct…`, `X offen`, `Offline`, `Anmelden` bei abgelaufener Sitzung mit Inline-Re-Login ohne Datenverlust, `Sync-Fehler`).
 
+5. **In-App-Updates auf Android:**
+   - **Beim Start (optional) & manuell:** Die App prüft optional bei jedem Start sowie über **Einstellungen → App-Updates → Nach Updates suchen** direkt gegen GitHub Releases ([`CHANGELOG.md`](CHANGELOG.md) wird im Update-Dialog samt Highlights angezeigt).
+   - **Benutzerdaten bleiben erhalten:** Beim Aktualisieren bleiben lokale SQLite-Bibliothek (`books`, `user_books`), Cover-Cache, Server-URL, `SecureStore`-Tokens und ungesyncte Änderungen vollständig erhalten.
+   - **Installationshinweis:** Nach dem verifizierten APK-Download öffnet Android den Paketinstaller. Voraussetzung für nahtlose In-Place-Updates ohne vorherige Deinstallation ist dieselbe APK-Signatur (`ANDROID_KEYSTORE_*`).
+
 ---
 
 ## 4. Lokale Entwicklung & Tests
@@ -368,13 +373,13 @@ Das Repository enthält zwei Workflows unter `.github/workflows/`:
   - `pull_request` auf `main` (führt Build + kompletten Container-Smoke-Test ohne Push aus)
   - `workflow_dispatch` (manuell mit Plattformwahl `linux/amd64,linux/arm64` oder `linux/amd64`)
 - **Ablauf:** Baut zuerst ein `linux/amd64`-Image und prüft es gegen [`scripts/docker-smoke-test.mjs`](scripts/docker-smoke-test.mjs); erst bei Erfolg wird das Multi-Arch-Image (`linux/amd64`, `linux/arm64`) nach `ghcr.io/michpese/bibliolisa` gepusht.
-- **Image-Tags:** `latest` (Standard-Branch), `main`, `<version>` & `<major>.<minor>` (bei SemVer-Tags wie `v0.1.0`), `sha-<commit>`.
+- **Image-Tags:** `latest` (Standard-Branch), `main`, `<version>` & `<major>.<minor>` (bei SemVer-Tags wie `v0.2.0`), `sha-<commit>`.
 - **Hinweis zur Sichtbarkeit:** Das erste automatisch angelegte GHCR-Package ist bei GitHub ggf. zunächst *private*. Soll `docker compose pull` ohne `docker login ghcr.io` funktionieren, unter **GitHub → Packages → bibliolisa → Package settings → Change visibility** auf *Public* umstellen (oder alternativ einmalig mit einem PAT `read:packages` einloggen).
 
 ### Android-APK als GitHub Release ([`.github/workflows/android-release.yml`](.github/workflows/android-release.yml))
 
 - **Trigger:**
-  - `push` auf Tags `v*` (baut die Standalone-APK und erstellt/aktualisiert automatisch das passende GitHub Release mit `.apk` und `.apk.sha256`)
+  - `push` auf Tags `v*` (baut die Standalone-APK und erstellt/aktualisiert automatisch das passende GitHub Release mit `.apk`, `.apk.sha256` und den passenden Highlights/Abschnitten aus [`CHANGELOG.md`](CHANGELOG.md))
   - `workflow_dispatch` (optional mit `release_tag`, `architectures` und `prerelease`; ohne `release_tag` wird die APK nur als Workflow-Artifact hochgeladen)
 - **Ablauf:** Installiert Workspace-Abhängigkeiten, baut `@bibliolisa/shared`, führt `typecheck` und `test` in `mobile/` aus, generiert das native Android-Projekt per `expo prebuild --platform android --clean --no-install` (inkl. `withLanNetworkSecurity` und `withAndroidReleaseSigning`), kompiliert `./gradlew assembleRelease` und verifiziert die Signatur mit `apksigner`.
 - **Release-Signatur (optional über Repository Secrets):**
@@ -393,9 +398,10 @@ Das Repository enthält zwei Workflows unter `.github/workflows/`:
 
 ### Gemeinsames Release (Docker-Image + Android-APK) auslösen
 
-Ein einzelner SemVer-Tag stößt beide Workflows gleichzeitig an:
+1. Passenden Abschnitt in [`CHANGELOG.md`](CHANGELOG.md) unter `## [<version>]` pflegen (`scripts/extract-changelog.mjs` übernimmt ihn automatisch in das GitHub Release).
+2. Einen SemVer-Tag setzen und pushen – er stößt beide Workflows gleichzeitig an:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```

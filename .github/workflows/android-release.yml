@@ -199,6 +199,7 @@ jobs:
           chmod +x mobile/android/gradlew
           test -f mobile/android/app/src/main/res/xml/network_security_config.xml
           grep -q '@xml/network_security_config' mobile/android/app/src/main/AndroidManifest.xml
+          grep -q 'REQUEST_INSTALL_PACKAGES' mobile/android/app/src/main/AndroidManifest.xml
           grep -q 'BIBLIOLISA_UPLOAD_STORE_FILE' mobile/android/app/build.gradle
 
       - name: Build Android Release APK
@@ -240,21 +241,57 @@ jobs:
           echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
 
           IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY,,}:${VERSION_NAME}"
-          cat > dist-release/release-notes.md <<EOF
-          ### Android APK
+          export SHA256 IMAGE_REF
+          node -e '
+            const fs = require("node:fs");
+            const { execFileSync } = require("node:child_process");
 
-          - **Datei:** \`${APK_NAME}\`
-          - **SHA-256:** \`${SHA256}\`
-          - **Version:** \`${VERSION_NAME}\` (\`versionCode ${VERSION_CODE}\`)
-          - **ABIs:** \`${TARGET_ARCHS}\`
-          - **Signatur:** \`${SIGNING_MODE}\`
+            const apkName = process.env.APK_NAME;
+            const apkBytes = fs.statSync(`dist-release/${apkName}`).size;
+            const apkSize = apkBytes >= 1048576
+              ? `${(apkBytes / 1048576).toFixed(1).replace(".", ",")} MB`
+              : `${Math.round(apkBytes / 1024)} KB`;
 
-          ### Docker-Image (GHCR)
+            const releaseTag = (process.env.RELEASE_TAG || "").trim();
+            let changelog = "";
+            if (releaseTag) {
+              try {
+                changelog = execFileSync(
+                  process.execPath,
+                  ["scripts/extract-changelog.mjs", releaseTag],
+                  { encoding: "utf8" }
+                ).trim();
+              } catch {
+                changelog = "";
+              }
+            }
 
-          \`\`\`bash
-          docker pull ${IMAGE_REF}
-          \`\`\`
-          EOF
+            const parts = [];
+            if (changelog) {
+              parts.push(changelog, "---");
+            }
+
+            parts.push(
+              [
+                "### Android APK",
+                "",
+                `- **Datei:** \`${apkName}\``,
+                `- **Größe:** \`${apkSize}\``,
+                `- **SHA-256:** \`${process.env.SHA256}\``,
+                `- **Version:** \`${process.env.VERSION_NAME}\` (\`versionCode ${process.env.VERSION_CODE}\`)`,
+                `- **ABIs:** \`${process.env.TARGET_ARCHS}\``,
+                `- **Signatur:** \`${process.env.SIGNING_MODE}\``,
+                "",
+                "### Docker-Image (GHCR)",
+                "",
+                "```bash",
+                `docker pull ${process.env.IMAGE_REF}`,
+                "```",
+              ].join("\n")
+            );
+
+            fs.writeFileSync("dist-release/release-notes.md", parts.join("\n\n") + "\n", "utf8");
+          '
 
       - name: Upload APK and checksum artifact
         uses: actions/upload-artifact@v7
@@ -274,7 +311,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Bibliolisa ${{ steps.meta.outputs.release_tag }}
           body_path: dist-release/release-notes.md
-          append_body: true
+          append_body: false
           generate_release_notes: true
           prerelease: ${{ steps.meta.outputs.is_prerelease == 'true' }}
           files: |

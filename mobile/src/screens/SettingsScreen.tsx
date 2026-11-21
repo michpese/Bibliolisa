@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -15,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import { useAppContext } from '../context/AppContext';
+import { useUpdateContext } from '../context/UpdateContext';
 import {
   checkServerHealth,
   normalizeServerUrl,
@@ -38,6 +40,19 @@ export function SettingsScreen() {
     signOut,
   } = useAppContext();
   const { snapshot: syncSnapshot, syncNow } = useSyncContext();
+  const {
+    currentVersion,
+    buildCode,
+    autoCheckEnabled,
+    isChecking: isCheckingUpdate,
+    lastCheckedAt,
+    availableRelease,
+    lastCheckMessage,
+    lastCheckError,
+    checkNow: checkForUpdatesNow,
+    setAutoCheckEnabled,
+    openUpdateModal,
+  } = useUpdateContext();
 
   const [urlInput, setUrlInput] = useState(serverUrl ?? '');
   const [testing, setTesting] = useState(false);
@@ -589,6 +604,118 @@ export function SettingsScreen() {
             </Pressable>
           )}
         </View>
+
+        {/* App-Updates */}
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.cardTitle, { color: theme.text }]}>
+            App-Updates
+          </Text>
+
+          <InfoLine
+            label="Installierte Version"
+            value={`v${currentVersion}${buildCode ? ` (Build ${buildCode})` : ''}`}
+            theme={theme}
+          />
+          <InfoLine
+            label="Letzte Prüfung"
+            value={lastCheckedAt ? formatDateTime(lastCheckedAt) : 'Noch nicht geprüft'}
+            theme={theme}
+          />
+
+          <View style={styles.switchRow}>
+            <Text style={[styles.switchLabel, { color: theme.text }]}>
+              Beim Start automatisch suchen
+            </Text>
+            <Switch
+              value={autoCheckEnabled}
+              onValueChange={(value) => void setAutoCheckEnabled(value)}
+              trackColor={{ false: theme.muted, true: theme.primary }}
+              thumbColor={theme.card}
+            />
+          </View>
+
+          {availableRelease ? (
+            <View
+              style={[
+                styles.diagBox,
+                { backgroundColor: theme.successSoft, gap: 6 },
+              ]}
+            >
+              <Text style={[styles.diagTitle, { color: theme.success }]}>
+                Neue Version v{availableRelease.version} verfügbar · Benutzerdaten
+                bleiben erhalten
+              </Text>
+              <Pressable
+                onPress={openUpdateModal}
+                style={[
+                  styles.updateInstallBtn,
+                  { backgroundColor: theme.primary },
+                ]}
+              >
+                <Ionicons
+                  name="arrow-down-circle-outline"
+                  size={17}
+                  color={theme.primaryText}
+                />
+                <Text
+                  style={[styles.primaryBtnText, { color: theme.primaryText }]}
+                >
+                  Update anzeigen & installieren
+                </Text>
+              </Pressable>
+            </View>
+          ) : lastCheckError ? (
+            <View
+              style={[styles.diagBox, { backgroundColor: theme.dangerSoft }]}
+            >
+              <Text style={[styles.diagText, { color: theme.danger }]}>
+                {lastCheckError}
+              </Text>
+            </View>
+          ) : lastCheckMessage ? (
+            <View style={[styles.diagBox, { backgroundColor: theme.muted }]}>
+              <Text style={[styles.diagText, { color: theme.text }]}>
+                {lastCheckMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          <Pressable
+            onPress={() => void checkForUpdatesNow('manual')}
+            disabled={isCheckingUpdate}
+            style={[
+              styles.updateCheckBtn,
+              {
+                backgroundColor: theme.accent,
+                opacity: isCheckingUpdate ? 0.7 : 1,
+              },
+            ]}
+          >
+            {isCheckingUpdate ? (
+              <ActivityIndicator size="small" color={theme.accentText} />
+            ) : (
+              <Ionicons
+                name="cloud-download-outline"
+                size={18}
+                color={theme.accentText}
+              />
+            )}
+            <Text style={[styles.secondaryBtnText, { color: theme.accentText }]}>
+              {isCheckingUpdate ? 'Prüfe auf Updates…' : 'Nach Updates suchen'}
+            </Text>
+          </Pressable>
+
+          <Text style={[styles.helper, { color: theme.textMuted }]}>
+            Updates werden über GitHub Releases geladen. Alle gespeicherten
+            Bücher, Cover, Bewertungen, Notizen und Einstellungen bleiben beim
+            Update unverändert erhalten.
+          </Text>
+        </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -743,5 +870,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  switchLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  updateInstallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 2,
+  },
+  updateCheckBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
   },
 });
