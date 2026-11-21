@@ -2,7 +2,8 @@
 #
 # Start:    cp .env.example .env   # JWT_SECRET setzen!
 #           mkdir -p data && sudo chown -R 10001:10001 data   # Container läuft als UID 10001 (Non-Root)
-#           docker compose up -d --build
+#           docker compose pull && docker compose up -d       # Vorgebautes GHCR-Image nutzen
+#     oder: docker compose up -d --build                      # Image lokal bauen
 #
 # Der bestehende Host-Reverse-Proxy leitet auf http://127.0.0.1:${HOST_PORT} weiter
 # (X-Forwarded-Proto / X-Forwarded-For werden dank TRUST_PROXY=true ausgewertet).
@@ -11,7 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: bibliolisa:local
+    image: ${BIBLIOLISA_IMAGE:-ghcr.io/michpese/bibliolisa:latest}
     container_name: bibliolisa
     restart: unless-stopped
     init: true

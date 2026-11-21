@@ -12,13 +12,19 @@ ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /app
 
 # ---------------------------------------------------------------------------
 # Stage 1: builder – installiert alle Workspaces und baut shared -> web -> server
 # ---------------------------------------------------------------------------
-FROM base AS builder
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-bookworm-slim AS builder
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+WORKDIR /app
 # Fallback-Toolchain, falls für eine Plattform kein Prebuild von better-sqlite3 existiert.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
@@ -29,7 +35,7 @@ COPY shared/package.json shared/package.json
 COPY server/package.json server/package.json
 COPY web/package.json web/package.json
 COPY mobile/package.json mobile/package.json
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+RUN --mount=type=cache,id=pnpm-store-builder,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter "@bibliolisa/shared..." --filter "@bibliolisa/server..." --filter "@bibliolisa/web..."
 
 COPY shared ./shared
@@ -43,6 +49,7 @@ RUN pnpm --filter @bibliolisa/shared build \
 # Stage 2: prod-deps – ausschließlich Produktionsabhängigkeiten des Servers
 # ---------------------------------------------------------------------------
 FROM base AS prod-deps
+ARG TARGETARCH
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
@@ -52,7 +59,7 @@ COPY shared/package.json shared/package.json
 COPY server/package.json server/package.json
 COPY web/package.json web/package.json
 COPY mobile/package.json mobile/package.json
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+RUN --mount=type=cache,id=pnpm-store-${TARGETARCH},target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --filter "@bibliolisa/server..." \
     && rm -rf mobile
 

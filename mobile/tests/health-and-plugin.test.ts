@@ -13,6 +13,9 @@ const withLanNetworkSecurity = require('../plugins/withLanNetworkSecurity.js') a
   }) => { manifest: { application: Array<{ $: Record<string, string> }> } };
   writeNetworkSecurityConfigFile: (platformProjectRoot: string) => string;
 };
+const withAndroidReleaseSigning = require('../plugins/withAndroidReleaseSigning.js') as {
+  applyAndroidReleaseSigning: (contents: string) => string;
+};
 
 describe('Server-URL-Normalisierung & Health-Check', () => {
   it('normalisiert gültige http://- und https://-URLs ohne festes LAN-Preset', () => {
@@ -124,5 +127,72 @@ describe('Expo Config Plugin withLanNetworkSecurity', () => {
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Expo Config Plugin withAndroidReleaseSigning', () => {
+  const sampleGradle = `android {
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            // Caution! In production, you need to generate your own keystore file.
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+        }
+    }
+}`;
+
+  it('ergänzt signingConfigs.release und bedingte Release-Signatur, lässt debug unverändert', () => {
+    const updated = withAndroidReleaseSigning.applyAndroidReleaseSigning(sampleGradle);
+
+    expect(updated).toContain('release {');
+    expect(updated).toContain("findProperty('BIBLIOLISA_UPLOAD_STORE_FILE')");
+    expect(updated).toContain("storePassword findProperty('BIBLIOLISA_UPLOAD_STORE_PASSWORD')");
+    expect(updated).toContain("keyAlias findProperty('BIBLIOLISA_UPLOAD_KEY_ALIAS')");
+    expect(updated).toContain("keyPassword findProperty('BIBLIOLISA_UPLOAD_KEY_PASSWORD')");
+    expect(updated).toContain(
+      "signingConfig ((findProperty('BIBLIOLISA_UPLOAD_STORE_FILE') ?: '').toString().trim() ? signingConfigs.release : signingConfigs.debug)"
+    );
+
+    const debugBlockMatch = /buildTypes\s*\{\s*debug\s*\{([\s\S]*?)\}\s*release\s*\{/.exec(updated);
+    expect(debugBlockMatch?.[1]).toContain('signingConfig signingConfigs.debug');
+    expect(debugBlockMatch?.[1]).not.toContain('BIBLIOLISA_UPLOAD_STORE_FILE');
+  });
+
+  it('ist idempotent bei mehrfacher Anwendung', () => {
+    const once = withAndroidReleaseSigning.applyAndroidReleaseSigning(sampleGradle);
+    const twice = withAndroidReleaseSigning.applyAndroidReleaseSigning(once);
+    expect(twice).toBe(once);
+  });
+
+  it('wirft einen klaren Fehler, wenn erwartete Gradle-Blöcke fehlen', () => {
+    expect(() =>
+      withAndroidReleaseSigning.applyAndroidReleaseSigning('android { buildTypes { release {} } }')
+    ).toThrow(/signingConfigs\.debug/);
+
+    expect(() =>
+      withAndroidReleaseSigning.applyAndroidReleaseSigning(`android {
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+    }
+}`)
+    ).toThrow(/buildTypes\.release/);
   });
 });
