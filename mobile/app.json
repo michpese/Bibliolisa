@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Bibliolisa",
+    "slug": "bibliolisa",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#4f46e5"
+    },
+    "android": {
+      "package": "de.bibliolisa.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#4f46e5"
+      },
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Bibliolisa benötigt Zugriff auf die Kamera zum Scannen von ISBN-Barcodes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Bibliolisa benötigt Zugriff auf Fotos zur Auswahl eigener Buchcover.",
+          "cameraPermission": "Bibliolisa benötigt Zugriff auf die Kamera zum Fotografieren von Buchcovern."
+        }
+      ],
+      "expo-sqlite",
+      "expo-secure-store",
+      "./plugins/withLanNetworkSecurity"
+    ]
+  }
+}

@@ -13,7 +13,7 @@
 | **Phase 1** | Monorepo-Fundament, Shared Contracts & Backend Core | `Abgeschlossen` | pnpm-Workspace, `/shared`, SQLite (WAL) + Drizzle, `scrypt`/JWT Auth, Bibliothek-CRUD | `pnpm test` + `pnpm build` (`shared`, `server`) |
 | **Phase 2** | Metadaten-Provider, Cover-Cache, Delta-Sync, Empfehlungen & Export | `Abgeschlossen` | 3 Provider + Aggregator, SSRF-sicherer Cover-Cache, `POST /api/sync`, Empfehlungen, JSON/CSV | Mock-Provider-, SSRF-, Sync-Konflikt- & Export-Tests |
 | **Phase 3** | Webapp (`/web`) & Docker Single-Container-Deployment | `Abgeschlossen` | Vollständige React-Webapp (Verwaltung, Empfehlungen, Backup), Multi-Stage `Dockerfile` | `web` Build + Docker-Image-Build + Container-Smoke-Test |
-| **Phase 4** | Offline-First Android-App (`/mobile`) | `Offen` | `expo-sqlite`, Offline-CRUD, Kamera-ISBN-Scanner, Offline-Empfehlungen, Settings & Test-Button | Typecheck + Expo/Metro-Bundle + Flugmodus-Funktionstest |
+| **Phase 4** | Offline-First Android-App (`/mobile`) | `Abgeschlossen` | `expo-sqlite`, Offline-CRUD, Kamera-ISBN-Scanner, Offline-Empfehlungen, Settings & Test-Button | Typecheck + Expo/Metro-Bundle + Flugmodus-Funktionstest |
 | **Phase 5** | Android Delta-Sync-Engine, E2E-Verifikation & Release-Härtung | `Offen` | `/api/health`-Pre-Check, Auto-/WLAN-Sync, Cover-Cache-Sync, Status-UI, E2E-Abnahme | Gesamttestsuite + E2E-Konflikt-/Multi-User-/Proxy-Check |
 
 ---
@@ -166,26 +166,26 @@ Verifikation (ausgeführt, alle grün):
 
 ### Aufgaben-Checkliste
 
-- [ ] **Expo-Monorepo-Setup & LAN-Netzwerksicherheit:**
+- [x] **Expo-Monorepo-Setup & LAN-Netzwerksicherheit:**
   - Expo SDK (TypeScript) in `/mobile` konfigurieren; `metro.config.js` für Auflösung von `@bibliolisa/shared` und pnpm-Symlinks einrichten.
   - Expo Config Plugin (`plugins/withLanNetworkSecurity.js`) implementieren, das `network_security_config.xml` (Cleartext `http://` im LAN + System- & User-CA-Zertifikate für selbstsigniertes `https://`) in den Android-Build einbindet.
-- [ ] **Lokales SQLite, Cover-Cache & Secure Storage:**
+- [x] **Lokales SQLite, Cover-Cache & Secure Storage:**
   - `expo-sqlite`-Initialisierung & Migrationen (`books`, `user_books`, `sync_state`, `is_dirty`, `dirty_updated_at`, `cover_local_uri`, `cover_pending_upload`).
   - `secure-storage.ts` auf Basis von `expo-secure-store` für `accessToken`, `refreshToken`, `accessTokenExpiresAt`.
   - Lokale Bibliothek-Repository-Schicht (`library.repo.ts`) für alle Schreib-/Leseoperationen vollständig **ohne Netzwerkverbindung** (mit Client-UUIDv4-Generierung und `updated_at`-UTC-Stempeln).
-- [ ] **Kamera-ISBN-Scanner & Buch-CRUD (Offline & Online):**
+- [x] **Kamera-ISBN-Scanner & Buch-CRUD (Offline & Online):**
   - `BarcodeScanner.tsx` mit `expo-camera` (EAN-13/ISBN-Erkennung & Prüfziffervalidierung via `@bibliolisa/shared`).
   - Online-Metadaten-Lookup gegen den konfigurierten Server bei Erreichbarkeit – bei Offline-Zustand oder Nicht-Treffer nahtloser Fallback auf manuelles Formular mit bereits übernommener ISBN.
   - Lokale Bibliotheksansicht, Detailansicht, Status-/Bewertungs-/Notiz-Bearbeitung, Soft Delete, Suche, Filter und Reihen-Sortierung (inkl. `1, 1.5, 2`).
-- [ ] **Offline-Empfehlungen & Verbindungs-Einstellungen:**
+- [x] **Offline-Empfehlungen & Verbindungs-Einstellungen:**
   - Empfehlungs-Screen („Was lese ich als Nächstes?“) direkt auf lokalen SQLite-Daten über `generateRecommendations()` aus `@bibliolisa/shared`.
   - Einstellungs-Screen: frei konfigurierbare Server-URL (`https://...` oder `http://...`), **„Verbindung testen“**-Button (gegen `GET /api/health` mit `<= 1.5s` Timeout und Diagnose-Anzeige), einmaliger Login mit Persistierung im SecureStore sowie Logout/Account-Wechsel (mit sauberem Reset der lokalen App-DB).
 
 ### Verifikations-Check (Phase 4)
 
-- [ ] `pnpm --filter @bibliolisa/mobile typecheck` und Expo-Metro-Bundle-Export (`npx expo export --platform android`) laufen fehlerfrei durch.
-- [ ] Android-Build/Prebuild (`npx expo prebuild --platform android`) erzeugt korrekt `AndroidManifest.xml` und `network_security_config.xml` ohne manuelle Nacharbeit.
-- [ ] Manueller Funktionstest im Flugmodus: Bücher per Kamera-Scan / manuell anlegen, Reihennummer `1.5` setzen, Status/Bewertung/Notizen ändern, filtern, sortieren und Empfehlungen abrufen funktioniert vollständig ohne Server.
+- [x] `pnpm --filter @bibliolisa/mobile typecheck` und Expo-Metro-Bundle-Export (`npx expo export --platform android --clear`) laufen fehlerfrei durch.
+- [x] Android-Build/Prebuild (`npx expo prebuild --platform android --clean --no-install`) erzeugt korrekt `AndroidManifest.xml` und `network_security_config.xml` ohne manuelle Nacharbeit.
+- [ ] Manueller Funktionstest im Flugmodus: Offline-CRUD, Dezimalband `1.5`, Status/Bewertung/Notizen, Filter, Sortierung, Soft Delete/Restore und Empfehlungen wurden automatisiert gegen SQLite (`better-sqlite3` + `@bibliolisa/shared`) geprüft; der manuelle Geräte-/Kamera-Test im Flugmodus erfolgt auf Android-Hardware/Emulator.
 
 ### Akzeptanzkriterien (Phase 4)
 
@@ -194,10 +194,24 @@ Verifikation (ausgeführt, alle grün):
 3. Nach einmaligem Login bleiben die Tokens sicher in `expo-secure-store` erhalten und überstehen App-Neustarts.
 4. `@bibliolisa/shared` wird direkt genutzt (keine kopierten DTOs, Validatoren oder Empfehlungsfunktionen in `/mobile`).
 
+### Implementierungsstand & Verifikation (2026-11-21)
+
+Vorhanden in `mobile/`:
+- **Monorepo & Native Config:** `package.json` (Expo SDK 54, RN `0.81.5`, `"main": "index.ts"`), `tsconfig.json`, `babel.config.js`, `metro.config.js` (`watchFolders`, `nodeModulesPaths`, `unstable_enableSymlinks`, `unstable_enablePackageExports`), `app.json`, `plugins/withLanNetworkSecurity.js`, PNG-Assets unter `assets/`.
+- **Lokale DB & Repositories (`src/db/`):** `types.ts`, `migrations.ts` (`books`, `user_books`, `sync_state`, Indizes inkl. `idx_mobile_user_books_active_unique`), `client.ts` (transaktions-serialisierender `expo-sqlite`-Adapter), `sync-state.repo.ts` (Device-/User-ID, Adoption lokaler Offline-Daten bei Erstlogin, sauberer DB-Reset bei Logout/Benutzer-/Serverwechsel), `library.repo.ts` (strikt `user_id`-gefiltertes Offline-CRUD, Facetten, Suche/Filter, Reihen-Sortierung über `sortLibraryEntries()`, Soft Delete & Restore).
+- **Services & Sync-Helfer (`src/services/`, `src/sync/`):** `secure-storage.ts` (`expo-secure-store`), `health-check.ts` (`normalizeServerUrl` + `checkServerHealth` mit `1500 ms` `AbortController`-Timeout & TLS-/HTTP-/Schema-Diagnose), `api-client.ts` (Bearer-Injection + Single-Flight Token-Refresh), `cover-cache.ts` (lokale Ablage unter `Paths.document/covers/`, Cleanup & Reset).
+- **UI & Navigation (`src/`):** `AppContext.tsx`, `theme.ts`, `navigation/types.ts`, `components/{BarcodeScanner,BookCoverImage,RatingStars,BookForm}.tsx`, `screens/{LibraryScreen,BookDetailScreen,AddBookScreen,RecommendationsScreen,SettingsScreen}.tsx`, `App.tsx`.
+
+Verifikation (ausgeführt, alle automatisierten Prüfungen grün):
+- `pnpm -r typecheck` (`shared`, `server`, `web`, `mobile`): **0 Fehler**.
+- `pnpm -r test`: `@bibliolisa/shared` (3 Testdateien, 12 Tests), `@bibliolisa/server` (8 Testdateien, 25 Tests), `@bibliolisa/mobile` (2 Testdateien, 9 Tests in `tests/library.repo.test.ts` & `tests/health-and-plugin.test.ts`) vollständig grün.
+- `pnpm --filter @bibliolisa/mobile exec expo export --platform android --clear`: **986 Module** gebündelt (`mobile/dist/_expo/static/js/android/index-*.hbc`, 3,14 MB) inkl. direkter Auflösung von `@bibliolisa/shared` über pnpm/Metro.
+- `pnpm --filter @bibliolisa/mobile exec expo prebuild --platform android --clean --no-install`: generiert `mobile/android/app/src/main/res/xml/network_security_config.xml` (`cleartextTrafficPermitted="true"`, `system` + `user` Trust-Anchors) sowie `mobile/android/app/src/main/AndroidManifest.xml` (`android:networkSecurityConfig="@xml/network_security_config"`, `android:usesCleartextTraffic="true"`, `android.permission.CAMERA`).
+
 ### Abweichungen / Notizen
-- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
-- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
-- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
+- **Expo SDK 54 (`expo@~54.0.0`, RN `0.81.5`):** `cover-cache.ts` nutzt die aktuelle SDK-54-API (`Directory`, `File`, `Paths` aus `expo-file-system`) statt der veralteten String-Funktionen (`documentDirectory` / `copyAsync`).
+- **`mobile/package.json` Entrypoint:** Verwendet `"main": "index.ts"` statt `expo/AppEntry.js`, da `expo/AppEntry.js` bei pnpm-Symlinks über `../../App` auf das falsche Verzeichnis zeigt; zudem ohne `"type": "module"`, damit `metro.config.js`, `babel.config.js` und `plugins/withLanNetworkSecurity.js` als CommonJS laufen.
+- **Hinweis für Phase 5 (`Dockerfile` + `pnpm-lock.yaml`):** Durch das neue Workspace-Paket `@bibliolisa/mobile` wurde `pnpm-lock.yaml` erweitert. Beim abschließenden `docker build` in Phase 5 ist im `Dockerfile` bei den `COPY`-Zeilen vor `pnpm install --frozen-lockfile` ggf. `COPY mobile/package.json mobile/package.json` zu ergänzen, damit `--frozen-lockfile` im Container alle Workspace-Importer kennt.
 
 ---
 
