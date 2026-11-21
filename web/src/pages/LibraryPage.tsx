@@ -114,6 +114,11 @@ export function LibraryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQ]);
 
+  // Browser-Navigation (Zurück/Vorwärts/Reset) -> Suchfeld synchron halten
+  useEffect(() => {
+    setSearchText((prev) => (prev.trim() === urlQ ? prev : urlQ));
+  }, [urlQ]);
+
   const filters: LibraryFilters = useMemo(
     () => ({
       q: urlQ.trim() || undefined,

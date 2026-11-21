@@ -264,4 +264,36 @@ describe('Empfehlungs-Engine (Stufe 1–3)', () => {
     expect(r1.categories.surprise_me).toHaveLength(4);
     expect(r3.seed).toBe(99);
   });
+
+  it('schließt unbegonnene Fortsetzungen (> Band 1) auch aus Quick-Read und Staubfänger aus', () => {
+    const entries: LibraryEntry[] = [
+      createEntry('30', {
+        title: 'Unbegonnene Reihe Band 2 (kurz & alt)',
+        seriesName: 'Neue Reihe',
+        seriesNumber: 2,
+        pageCount: 90,
+        addedAt: '2020-01-01T10:00:00.000Z',
+        status: 'unread',
+      }),
+      createEntry('31', {
+        title: 'Unbegonnene Reihe Band 1',
+        seriesName: 'Neue Reihe',
+        seriesNumber: 1,
+        pageCount: 220,
+        addedAt: '2026-10-01T10:00:00.000Z',
+        status: 'unread',
+      }),
+    ];
+
+    const result = generateRecommendations(entries, {
+      now: new Date('2026-11-21T10:00:00.000Z'),
+    });
+
+    expect(result.categories.quick_read.map((x) => x.bookId)).toEqual([
+      entries[1]?.bookId,
+    ]);
+    expect(result.categories.dust_collector.map((x) => x.bookId)).toEqual([
+      entries[1]?.bookId,
+    ]);
+  });
 });

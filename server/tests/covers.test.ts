@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -6,7 +7,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { parseEnv } from '../src/config/env.js';
 import type { FetchLike } from '../src/metadata/types.js';
-import { isBlockedIpAddress } from '../src/services/cover.service.js';
+import {
+  isBlockedIpAddress,
+  pinnedHttpDownload,
+} from '../src/services/cover.service.js';
 
 const tempDirs: string[] = [];
 
@@ -122,6 +126,12 @@ describe('Cover-Cache, SSRF-Schutz, WebP-Verarbeitung & Media-Auth', () => {
           headers: { location: 'http://169.254.169.254/latest/meta-data/' },
         });
       }
+      if (url === 'https://cdn.example.org/bad-redirect') {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'http://[invalid' },
+        });
+      }
       if (url.startsWith('https://cdn.example.org/hop-')) {
         const hopNum = Number(url.split('hop-')[1]);
         return new Response(null, {
@@ -212,6 +222,16 @@ describe('Cover-Cache, SSRF-Schutz, WebP-Verarbeitung & Media-Auth', () => {
         expect(res.statusCode).toBe(400);
         expect(res.json().error.code).toBe('SSRF_BLOCKED');
       }
+
+      // Ungültiger Redirect-Location-Header liefert 502 (kein 500-Crash)
+      const badRedirect = await app.inject({
+        method: 'POST',
+        url: `/api/books/${bookId}/cover/fetch`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { url: 'https://cdn.example.org/bad-redirect' },
+      });
+      expect(badRedirect.statusCode).toBe(502);
+      expect(badRedirect.json().error.code).toBe('COVER_FETCH_FAILED');
 
       // > 3 Redirects ablehnen
       const tooManyRedirects = await app.inject({
@@ -452,6 +472,115 @@ describe('Cover-Cache, SSRF-Schutz, WebP-Verarbeitung & Media-Auth', () => {
       expect(forbiddenUpload.statusCode).toBe(404);
     } finally {
       await app.close();
+    }
+  });
+
+  it('pinnt HTTP-Verbindungen via lookup auf die validierte IP (kein DNS-Rebinding) und bereinigt verwaiste Cover', async () => {
+    const server = http.createServer((req, res) => {
+      if (req.url === '/cover.png') {
+        res.writeHead(200, { 'content-type': 'image/png' });
+        res.end(Buffer.from('pinned-ok'));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') {
+      server.close();
+      throw new Error('Server address missing');
+    }
+
+    const dataDir = createTempDataDir();
+    const env = parseEnv({
+      DATA_DIR: dataDir,
+      JWT_SECRET: 'cover-pin-test-secret-with-at-least-32-chars',
+      LOG_LEVEL: 'silent',
+    });
+
+    try {
+      // Unauflösbarer Hostname wird ohne erneuten DNS-Lookup direkt über die gepinnte IP bedient
+      const controller = new AbortController();
+      const result = await pinnedHttpDownload({
+        url: new URL(
+          `http://definitely-not-resolvable.invalid:${addr.port}/cover.png`
+        ),
+        address: '127.0.0.1',
+        family: 4,
+        maxDownloadBytes: 1024 * 1024,
+        signal: controller.signal,
+        userAgent: 'Bibliolisa-Test/0.1.0',
+      });
+      expect(result).toEqual({
+        kind: 'ok',
+        buffer: Buffer.from('pinned-ok'),
+      });
+
+      // Verwaiste Cover-Bereinigung prüfen
+      const { app, coverService } = await buildApp({
+        env,
+        dbPath: ':memory:',
+        logger: false,
+      });
+
+      try {
+        const reg = await app.inject({
+          method: 'POST',
+          url: '/api/auth/register',
+          payload: {
+            username: 'cleancover',
+            password: 'Password123!',
+            clientType: 'mobile',
+          },
+        });
+        const token = reg.json().accessToken as string;
+
+        const bookRes = await app.inject({
+          method: 'POST',
+          url: '/api/library',
+          headers: { authorization: `Bearer ${token}` },
+          payload: { book: { title: 'Keep Cover Book', authors: ['Autor'] } },
+        });
+        const bookId = bookRes.json().bookId as string;
+
+        const pngBuf = await sharp({
+          create: {
+            width: 100,
+            height: 150,
+            channels: 3,
+            background: { r: 10, g: 20, b: 30 },
+          },
+        })
+          .png()
+          .toBuffer();
+
+        const upload = buildMultipartBody('file', 'keep.png', 'image/png', pngBuf);
+        const upRes = await app.inject({
+          method: 'POST',
+          url: `/api/books/${bookId}/cover`,
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': upload.contentTypeHeader,
+          },
+          payload: upload.payload,
+        });
+        expect(upRes.statusCode).toBe(200);
+        const activeKey = upRes.json().coverKey as string;
+
+        const orphanPath = path.join(dataDir, 'covers', '000000000000000000000000.webp');
+        fs.writeFileSync(orphanPath, Buffer.from('orphan'));
+
+        const removed = await coverService.cleanupOrphanCovers(0);
+        expect(removed).toBe(1);
+        expect(fs.existsSync(orphanPath)).toBe(false);
+        expect(fs.existsSync(path.join(dataDir, 'covers', activeKey))).toBe(true);
+      } finally {
+        await app.close();
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

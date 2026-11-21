@@ -25,8 +25,9 @@ import { CoverService, type DnsLookupFn } from './services/cover.service.js';
 import { ExportService } from './services/export.service.js';
 import { LibraryService } from './services/library.service.js';
 import { SyncService } from './services/sync.service.js';
+import { resolveServerVersion, SERVER_VERSION } from './version.js';
 
-export const SERVER_VERSION = '0.1.0';
+export { resolveServerVersion, SERVER_VERSION };
 
 export interface BuildAppOptions {
   env: ServerEnv;
@@ -90,6 +91,47 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   });
 
   registerErrorHandler(app, { spaFallback: webDir !== null });
+
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (!reply.hasHeader('X-Content-Type-Options')) {
+      reply.header('X-Content-Type-Options', 'nosniff');
+    }
+    if (!reply.hasHeader('X-Frame-Options')) {
+      reply.header('X-Frame-Options', 'DENY');
+    }
+    if (!reply.hasHeader('Referrer-Policy')) {
+      reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    }
+    if (!reply.hasHeader('Permissions-Policy')) {
+      reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    }
+    if (
+      request.protocol === 'https' &&
+      !reply.hasHeader('Strict-Transport-Security')
+    ) {
+      reply.header(
+        'Strict-Transport-Security',
+        'max-age=31536000; includeSubDomains'
+      );
+    }
+
+    const contentType =
+      reply.getHeader('content-type') ?? reply.raw.getHeader('content-type');
+    const contentTypeStr = Array.isArray(contentType)
+      ? contentType.join(';')
+      : String(contentType ?? '');
+    if (
+      contentTypeStr.toLowerCase().startsWith('text/html') &&
+      !reply.hasHeader('Content-Security-Policy')
+    ) {
+      reply.header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+      );
+    }
+
+    return payload;
+  });
 
   const authService = new AuthService({
     dbCtx,

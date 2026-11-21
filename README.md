@@ -1,5 +1,10 @@
 # Bibliolisa
 
+[![Docker Image](https://github.com/michpese/Bibliolisa/actions/workflows/docker.yml/badge.svg)](https://github.com/michpese/Bibliolisa/actions/workflows/docker.yml)
+[![Android Release](https://github.com/michpese/Bibliolisa/actions/workflows/android-release.yml/badge.svg)](https://github.com/michpese/Bibliolisa/actions/workflows/android-release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/michpese/Bibliolisa)](https://github.com/michpese/Bibliolisa/releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 **Bibliolisa** ist eine selbstgehostete Bücher-Indexierungs-Plattform für das lokale Netzwerk (LAN) oder den Betrieb hinter einem bestehenden Reverse Proxy – bestehend aus einem **Single-Container-Server (Fastify 5 API + React Webapp + SQLite WAL)** und einer **Offline-First Android-App (React Native / Expo)** mit Kamera-ISBN-Scanner und bidirektionalem Delta-Sync.
 
 ---
@@ -373,7 +378,7 @@ Das Repository enthält zwei Workflows unter `.github/workflows/`:
   - `workflow_dispatch` (optional mit `release_tag`, `architectures` und `prerelease`; ohne `release_tag` wird die APK nur als Workflow-Artifact hochgeladen)
 - **Ablauf:** Installiert Workspace-Abhängigkeiten, baut `@bibliolisa/shared`, führt `typecheck` und `test` in `mobile/` aus, generiert das native Android-Projekt per `expo prebuild --platform android --clean --no-install` (inkl. `withLanNetworkSecurity` und `withAndroidReleaseSigning`), kompiliert `./gradlew assembleRelease` und verifiziert die Signatur mit `apksigner`.
 - **Release-Signatur (optional über Repository Secrets):**
-  Ohne Secrets nutzt Gradle automatisch Expos deterministischen Debug-Fallback-Keystore (direkt installierbar per Sideloading). Für einen eigenen dauerhaften Signierschlüssel lassen sich folgende vier GitHub Repository Secrets hinterlegen:
+  Ohne Secrets nutzt Gradle automatisch Expos deterministischen Debug-Fallback-Keystore (direkt installierbar per Sideloading). **Sicherheitsempfehlung für öffentliche Releases:** Vor dem Veröffentlichen der ersten APK unbedingt die vier Secrets mit einem eigenen Release-Keystore hinterlegen, damit spätere App-Updates nahtlos ohne Deinstallation eingespielt werden können und niemand mit dem öffentlich bekannten Debug-Schlüssel signierte APKs unterschieben kann:
   - `ANDROID_KEYSTORE_BASE64`
   - `ANDROID_KEYSTORE_PASSWORD`
   - `ANDROID_KEY_ALIAS`

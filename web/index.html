@@ -8,19 +8,7 @@
     <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <title>Bibliolisa</title>
-    <script>
-      // Theme vor dem ersten Paint setzen (verhindert Flackern).
-      (function () {
-        try {
-          var stored = localStorage.getItem('bibliolisa-theme');
-          var dark =
-            stored === 'dark' ||
-            ((stored === null || stored === 'system') &&
-              window.matchMedia('(prefers-color-scheme: dark)').matches);
-          if (dark) document.documentElement.classList.add('dark');
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -332,7 +334,14 @@ export function AddBookScreen() {
       edges={['top']}
       style={[styles.container, { backgroundColor: theme.background }]}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
         <Text style={[styles.screenTitle, { color: theme.text }]}>
           Buch hinzufügen
         </Text>
@@ -621,7 +630,8 @@ export function AddBookScreen() {
           submitting={submitting}
           onSubmit={handleCreateBook}
         />
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <BarcodeScanner
         visible={scannerOpen}

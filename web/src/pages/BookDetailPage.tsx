@@ -1,21 +1,31 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, Pencil, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ApiError, errorMessage } from '@/api/client';
+import { ApiError, api, errorMessage } from '@/api/client';
 import { BookCover } from '@/components/BookCover';
 import { BookFormDialog } from '@/components/BookFormDialog';
 import { RatingStars } from '@/components/RatingStars';
 import { SeriesCard } from '@/components/SeriesCard';
 import { StatusSwitcher } from '@/components/StatusSwitcher';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/field';
 import { Badge, Card, Skeleton } from '@/components/ui/misc';
 import {
+  libraryKeys,
   useDeleteEntry,
   useEntry,
   useLibraryAll,
-  useRestoreEntry,
   useUpdateEntry,
 } from '@/hooks/useLibrary';
 import {
@@ -28,13 +38,14 @@ import { buildSeriesGroup } from '@/lib/series';
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const entryQuery = useEntry(id);
   const entry = entryQuery.data;
   const update = useUpdateEntry();
   const remove = useDeleteEntry();
-  const restore = useRestoreEntry();
 
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -91,17 +102,29 @@ export function BookDetailPage() {
   const notesDirty = notes.trim() !== (entry.notes ?? '').trim();
 
   const handleDelete = () => {
-    remove.mutate(entry.id, {
+    const entryId = entry.id;
+    const bookTitle = book.title;
+    remove.mutate(entryId, {
       onSuccess: () => {
-        toast(`„${book.title}“ wurde entfernt.`, {
+        setDeleteConfirmOpen(false);
+        toast(`„${bookTitle}“ wurde entfernt.`, {
           duration: 10_000,
           action: {
             label: 'Wiederherstellen',
-            onClick: () =>
-              restore.mutate(entry.id, {
-                onSuccess: () => toast.success('Eintrag wiederhergestellt.'),
-                onError: (error) => toast.error(errorMessage(error)),
-              }),
+            onClick: () => {
+              void api
+                .restoreEntry(entryId)
+                .then(() => {
+                  void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
+                  void queryClient.invalidateQueries({
+                    queryKey: libraryKeys.recommendations,
+                  });
+                  toast.success('Eintrag wiederhergestellt.');
+                })
+                .catch((error) => {
+                  toast.error(errorMessage(error));
+                });
+            },
           },
         });
         navigate('/', { replace: true });
@@ -135,7 +158,7 @@ export function BookDetailPage() {
             variant="outline"
             size="sm"
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={handleDelete}
+            onClick={() => setDeleteConfirmOpen(true)}
             disabled={remove.isPending}
           >
             {remove.isPending ? (
@@ -293,6 +316,42 @@ export function BookDetailPage() {
       )}
 
       <BookFormDialog open={editOpen} onOpenChange={setEditOpen} entry={entry} />
+
+      <Dialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => !remove.isPending && setDeleteConfirmOpen(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Buch entfernen?</DialogTitle>
+            <DialogDescription>
+              Möchtest du „{book.title}“ aus deiner Bibliothek entfernen?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <p className="text-sm text-muted-foreground">
+              Der Eintrag kann direkt im Anschluss über die Benachrichtigung wiederhergestellt werden.
+            </p>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={remove.isPending}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={remove.isPending}
+            >
+              {remove.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Entfernen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

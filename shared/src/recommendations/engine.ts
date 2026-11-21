@@ -36,7 +36,22 @@ function formatDecimalComma(value: number): string {
 }
 
 function formatSeriesNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(value);
+  return String(value);
+}
+
+function isUnstartedSequel(
+  entry: LibraryEntry,
+  startedSeriesKeys: ReadonlySet<string>
+): boolean {
+  const seriesKey = entry.book.seriesName?.trim()
+    ? normalizeKey(entry.book.seriesName)
+    : null;
+  return (
+    seriesKey !== null &&
+    !startedSeriesKeys.has(seriesKey) &&
+    entry.book.seriesNumber !== null &&
+    entry.book.seriesNumber > 1
+  );
 }
 
 /**
@@ -414,15 +429,7 @@ export function generateRecommendations(
     }
 
     // Reihen-Schutzregel: keine Fortsetzungen (> Band 1) einer noch nicht begonnenen Reihe
-    const seriesKey = entry.book.seriesName?.trim()
-      ? normalizeKey(entry.book.seriesName)
-      : null;
-    const isUnstartedSequel =
-      seriesKey !== null &&
-      !startedSeriesKeys.has(seriesKey) &&
-      entry.book.seriesNumber !== null &&
-      entry.book.seriesNumber > 1;
-    if (isUnstartedSequel) {
+    if (isUnstartedSequel(entry, startedSeriesKeys)) {
       continue;
     }
 
@@ -485,7 +492,8 @@ export function generateRecommendations(
       (entry): entry is LibraryEntry & { book: { pageCount: number } } =>
         entry.book.pageCount !== null &&
         entry.book.pageCount > 0 &&
-        entry.book.pageCount < 300
+        entry.book.pageCount < 300 &&
+        !isUnstartedSequel(entry, startedSeriesKeys)
     )
     .sort((a, b) => {
       const pageDiff = a.book.pageCount - b.book.pageCount;
@@ -511,7 +519,8 @@ export function generateRecommendations(
 
   // --- Stufe 3b: Staubfänger (älteste ungelesene Bücher zuerst) ---
   const nowMs = now.getTime();
-  const dustCollectorCandidates = [...unreadEntries]
+  const dustCollectorCandidates = unreadEntries
+    .filter((entry) => !isUnstartedSequel(entry, startedSeriesKeys))
     .sort((a, b) => {
       if (a.addedAt !== b.addedAt) return a.addedAt < b.addedAt ? -1 : 1;
       return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);

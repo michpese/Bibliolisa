@@ -91,6 +91,10 @@ export function registerAuthRoutes(
     max: options.rateLimitMax ?? 10,
     timeWindow: '1 minute',
   };
+  const refreshRateLimit = {
+    max: (options.rateLimitMax ?? 10) * 3,
+    timeWindow: '1 minute',
+  };
 
   app.post(
     '/api/auth/register',
@@ -114,7 +118,10 @@ export function registerAuthRoutes(
     }
   );
 
-  app.post('/api/auth/refresh', async (request, reply) => {
+  app.post(
+    '/api/auth/refresh',
+    { config: { rateLimit: refreshRateLimit } },
+    async (request, reply) => {
     const body = RefreshRequestSchema.parse(request.body ?? {});
     const rawRefreshToken =
       body.refreshToken ?? request.cookies?.[REFRESH_COOKIE_NAME];
@@ -169,7 +176,10 @@ export function registerAuthRoutes(
     return reply.status(204).send();
   });
 
-  app.post('/api/auth/change-password', async (request, reply) => {
+  app.post(
+    '/api/auth/change-password',
+    { config: { rateLimit: authRateLimit } },
+    async (request, reply) => {
     const body = ChangePasswordRequestSchema.parse(request.body ?? {});
     const currentRefreshToken = request.cookies?.[REFRESH_COOKIE_NAME];
     const headerDeviceId = request.headers['x-device-id'];

@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -55,17 +57,22 @@ export function SettingsScreen() {
     }
   }, [serverUrl]);
 
+  const prefilledUsernameForRef = useRef<string | null>(null);
   useEffect(() => {
+    if (isAuthenticated) {
+      prefilledUsernameForRef.current = null;
+      return;
+    }
     if (
-      !isAuthenticated &&
       session &&
       !session.isLocalOnlyUser &&
       session.username &&
-      username === ''
+      prefilledUsernameForRef.current !== session.username
     ) {
+      prefilledUsernameForRef.current = session.username;
       setUsername(session.username);
     }
-  }, [isAuthenticated, session, username]);
+  }, [isAuthenticated, session]);
 
   const handleTestConnection = async () => {
     setTesting(true);
@@ -154,7 +161,7 @@ export function SettingsScreen() {
       void syncNow('manual');
       Alert.alert(
         'Angemeldet',
-        'Sitzung wurde sicher in expo-secure-store gespeichert und Synchronisierung gestartet.'
+        'Du bist jetzt angemeldet. Die Synchronisierung wurde gestartet.'
       );
     } catch (error) {
       setAuthError(
@@ -188,27 +195,34 @@ export function SettingsScreen() {
       edges={['top']}
       style={[styles.container, { backgroundColor: theme.background }]}
     >
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.screenTitle, { color: theme.text }]}>
-          Einstellungen
-        </Text>
-        <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
-          Server-URL, Verbindungstest (max. 1,5 s) und Gerätekonto.
-        </Text>
-
-        {/* Server-Konfiguration */}
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: theme.card, borderColor: theme.border },
-          ]}
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>
-            Bibliolisa-Server
+          <Text style={[styles.screenTitle, { color: theme.text }]}>
+            Einstellungen
           </Text>
-          <Text style={[styles.helper, { color: theme.textMuted }]}>
-            Beliebige http://- (LAN) oder https://-URL (Reverse Proxy). Keine URL ist fest im Code hinterlegt.
+          <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
+            Server-Verbindung, Benutzerkonto und Synchronisation.
           </Text>
+
+          {/* Server-Konfiguration */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.card, borderColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.cardTitle, { color: theme.text }]}>
+              Bibliolisa-Server
+            </Text>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>
+              Adresse deines Bibliolisa-Servers im Heimnetz (http://) oder über Reverse Proxy (https://).
+            </Text>
 
           <TextInput
             value={urlInput}
@@ -312,7 +326,7 @@ export function SettingsScreen() {
           ]}
         >
           <Text style={[styles.cardTitle, { color: theme.text }]}>
-            Benutzerkonto (SecureStore)
+            Benutzerkonto
           </Text>
 
           {isAuthenticated && session ? (
@@ -323,7 +337,7 @@ export function SettingsScreen() {
                 {session.displayName ? ` (${session.displayName})` : ''}
               </Text>
               <Text style={[styles.helper, { color: theme.textMuted }]}>
-                Rolle: {session.role ?? 'user'} · Tokens liegen verschlüsselt in expo-secure-store und überstehen App-Neustarts.
+                {`Rolle: ${session.role ?? 'user'} · Anmeldung ist sicher auf diesem Gerät gespeichert.`}
               </Text>
               <Pressable
                 onPress={handleSignOut}
@@ -575,7 +589,8 @@ export function SettingsScreen() {
             </Pressable>
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

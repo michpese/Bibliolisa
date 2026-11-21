@@ -495,4 +495,100 @@ describe('Auth, Config & Sicherheit', () => {
       await app.close();
     }
   });
+
+  it('bereinigt abgelaufene sowie alte widerrufene Refresh Tokens und begrenzt /api/auth/refresh per Rate-Limit', async () => {
+    let currentMs = Date.parse('2026-11-21T10:00:00.000Z');
+    const { app, authService, dbCtx } = await buildApp({
+      env: { ...BASE_ENV, ALLOW_REGISTRATION: false },
+      dbPath: ':memory:',
+      authRateLimitMax: 2,
+      now: () => new Date(currentMs),
+      logger: false,
+    });
+
+    try {
+      const regAdmin = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'admin1',
+          password: 'Password123!',
+          clientType: 'mobile',
+        },
+      });
+      expect(regAdmin.statusCode).toBe(201);
+      const refreshToken = regAdmin.json().refreshToken as string;
+
+      // Registrierung bei ALLOW_REGISTRATION=false lehnt sofort vor scrypt ab
+      const regBlocked = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'blockeduser',
+          password: 'Password123!',
+          clientType: 'mobile',
+        },
+      });
+      expect(regBlocked.statusCode).toBe(403);
+      expect(regBlocked.json().error.code).toBe('REGISTRATION_DISABLED');
+
+      // Zusätzliches abgelaufenes Token und altes widerrufenes Token einfügen
+      const userId = regAdmin.json().user.id as string;
+      dbCtx.sqlite
+        .prepare(
+          `INSERT INTO refresh_tokens (id, user_id, token_hash, client_type, expires_at, revoked_at, created_at)
+           VALUES (?, ?, ?, 'mobile', ?, NULL, ?)`
+        )
+        .run(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+          userId,
+          'expired-hash',
+          '2026-11-20T10:00:00.000Z',
+          '2026-10-01T10:00:00.000Z'
+        );
+      dbCtx.sqlite
+        .prepare(
+          `INSERT INTO refresh_tokens (id, user_id, token_hash, client_type, expires_at, revoked_at, created_at)
+           VALUES (?, ?, ?, 'mobile', ?, ?, ?)`
+        )
+        .run(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+          userId,
+          'old-revoked-hash',
+          '2027-11-20T10:00:00.000Z',
+          '2026-11-10T10:00:00.000Z',
+          '2026-11-01T10:00:00.000Z'
+        );
+
+      const pruned = authService.pruneExpiredAndRevokedTokens(7);
+      expect(pruned).toBe(2);
+
+      const remaining = dbCtx.sqlite
+        .prepare('SELECT COUNT(*) AS cnt FROM refresh_tokens')
+        .get() as { cnt: number };
+      expect(remaining.cnt).toBe(1);
+
+      // /api/auth/refresh Rate-Limit: authRateLimitMax=2 => max 6/min
+      for (let i = 0; i < 6; i++) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/auth/refresh',
+          headers: { 'x-forwarded-for': '203.0.113.77' },
+          payload: { refreshToken: `invalid-${i}`, clientType: 'mobile' },
+        });
+        expect(res.statusCode).toBe(401);
+      }
+
+      const limitedRefresh = await app.inject({
+        method: 'POST',
+        url: '/api/auth/refresh',
+        headers: { 'x-forwarded-for': '203.0.113.77' },
+        payload: { refreshToken, clientType: 'mobile' },
+      });
+      expect(limitedRefresh.statusCode).toBe(429);
+      expect(limitedRefresh.json().error.code).toBe('RATE_LIMITED');
+    } finally {
+      await app.close();
+    }
+  });
 });

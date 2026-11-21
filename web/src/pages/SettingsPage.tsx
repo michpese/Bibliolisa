@@ -146,6 +146,7 @@ function SessionsCard() {
 }
 
 function PasswordCard() {
+  const queryClient = useQueryClient();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -165,6 +166,7 @@ function PasswordCard() {
       setNext('');
       setConfirm('');
       setError(null);
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
     onError: (err) => setError(errorMessage(err)),
   });

@@ -710,4 +710,109 @@ describe('Mobile SyncEngine (Unit & Contract)', () => {
     expect(cleanedOrphansInput).toContain(`file:///app/covers/${uploadedKey}`);
     expect(cleanedOrphansInput).not.toContain('file:///app/covers/local-photo.jpg');
   });
+
+  it('setzt cover_pending_upload bei permanentem Upload-Fehler (z. B. 413) zurück, behält es aber bei 500 für Retries', async () => {
+    const permanentEntry = await createLocalLibraryEntry(
+      db,
+      userId,
+      {
+        book: { title: 'Zu großes Cover', authors: ['Autor'], genres: [], metadataSource: 'manual' },
+        status: 'unread',
+      },
+      {
+        generateUuid: nextUuid,
+        coverLocalUri: 'file:///app/covers/too-large.jpg',
+        coverPendingUpload: true,
+      }
+    );
+
+    const transientEntry = await createLocalLibraryEntry(
+      db,
+      userId,
+      {
+        book: { title: 'Serverfehler Cover', authors: ['Autor'], genres: [], metadataSource: 'manual' },
+        status: 'unread',
+      },
+      {
+        generateUuid: nextUuid,
+        coverLocalUri: 'file:///app/covers/server-500.jpg',
+        coverPendingUpload: true,
+      }
+    );
+
+    let failPermanent = true;
+
+    const createEngine = () =>
+      new SyncEngine({
+        db,
+        checkHealth: async (url) => ({
+          ok: true,
+          url,
+          latencyMs: 2,
+          health: {
+            status: 'ok',
+            version: '0.1.0',
+            serverTime: '2026-11-21T10:00:00.000Z',
+            allowRegistration: true,
+            providers: { openLibrary: true, googleBooks: true, hardcover: false },
+          },
+        }),
+        ensureAccessToken: async () => 'token-123',
+        hasStoredTokens: async () => true,
+        syncRequest: async (_url, payload): Promise<SyncResponse> => ({
+          serverTime: '2026-11-21T10:00:00.000Z',
+          nextCursor: 'c-cover-err',
+          hasMore: false,
+          clockSkewMs: 0,
+          clockSkewWarning: false,
+          pushResults: {
+            books: payload.changes.books.map((b) => ({ id: b.id, status: 'accepted' })),
+            userBooks: payload.changes.userBooks.map((ub) => ({
+              id: ub.id,
+              status: 'accepted',
+            })),
+          },
+          pull: { books: [], userBooks: [] },
+        }),
+        coverAdapter: createNoopCoverAdapter({
+          uploadCover: async ({ bookId }) => {
+            if (bookId === permanentEntry.bookId && failPermanent) {
+              throw Object.assign(new Error('Cover zu groß'), {
+                status: 413,
+                code: 'COVER_TOO_LARGE',
+              });
+            }
+            throw Object.assign(new Error('Interner Serverfehler'), {
+              status: 500,
+              code: 'INTERNAL_SERVER_ERROR',
+            });
+          },
+        }),
+      });
+
+    const snap1 = await createEngine().sync('manual');
+    // transientEntry hat weiterhin cover_pending_upload = 1 -> status 'pending', pendingCount = 1
+    expect(snap1.status).toBe('pending');
+    expect(snap1.pendingCount).toBe(1);
+
+    const permAfter = await getLocalLibraryEntryById(db, userId, permanentEntry.id);
+    const transAfter = await getLocalLibraryEntryById(db, userId, transientEntry.id);
+    expect(permAfter?.coverPendingUpload).toBe(false);
+    expect(transAfter?.coverPendingUpload).toBe(true);
+
+    // Prüfe zusätzlich: wenn nur ein permanenter 400/413-Fehler existiert, endet Sync auf 'synced' mit 0 offen
+    await db.runAsync(
+      'UPDATE books SET cover_pending_upload = 0 WHERE id = ?',
+      transientEntry.bookId
+    );
+    await db.runAsync(
+      'UPDATE books SET cover_pending_upload = 1 WHERE id = ?',
+      permanentEntry.bookId
+    );
+    failPermanent = true;
+
+    const snap2 = await createEngine().sync('manual');
+    expect(snap2.status).toBe('synced');
+    expect(snap2.pendingCount).toBe(0);
+  });
 });

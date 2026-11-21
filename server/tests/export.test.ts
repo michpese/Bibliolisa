@@ -298,4 +298,164 @@ describe('Export (JSON/CSV), Formula-Injection-Schutz & Idempotenter Import', ()
       await app.close();
     }
   });
+
+  it('verhindert Cross-Tenant-Buchüberschreibung beim JSON-Import, kappt Zukunfts-Timestamps und verwirft fehlende coverKeys', async () => {
+    const nowMs = Date.parse('2026-11-21T10:00:00.000Z');
+    const { app, dbCtx } = await buildApp({
+      env: BASE_ENV,
+      dbPath: ':memory:',
+      now: () => new Date(nowMs),
+      logger: false,
+    });
+
+    try {
+      const regA = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'ownerA',
+          password: 'Password123!',
+          clientType: 'mobile',
+        },
+      });
+      const tokenA = regA.json().accessToken as string;
+
+      const regB = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'attackerB',
+          password: 'Password123!',
+          clientType: 'mobile',
+        },
+      });
+      const tokenB = regB.json().accessToken as string;
+
+      const createA = await app.inject({
+        method: 'POST',
+        url: '/api/library',
+        headers: { authorization: `Bearer ${tokenA}` },
+        payload: {
+          status: 'read',
+          book: {
+            title: 'Originaltitel von User A',
+            authors: ['Original Autor'],
+            isbn13: '9783453267176',
+          },
+        },
+      });
+      expect(createA.statusCode).toBe(201);
+      const entryA = createA.json();
+
+      // User B importiert ein JSON mit derselben Buch-ID / ISBN, manipuliertem Titel + Jahr 2099
+      // sowie ein neues Buch mit nicht existierendem coverKey
+      const tamperedPayload = {
+        version: 1,
+        exportedAt: '2026-11-21T10:00:00.000Z',
+        user: {
+          id: regB.json().user.id,
+          username: 'attackerB',
+          displayName: null,
+        },
+        entries: [
+          {
+            userBookId: '44444444-4444-4444-8444-444444444441',
+            status: 'unread',
+            rating: null,
+            notes: 'Notiz von B',
+            addedAt: '2026-11-21T10:00:00.000Z',
+            startedAt: null,
+            finishedAt: null,
+            createdAt: '2026-11-21T10:00:00.000Z',
+            updatedAt: '2099-01-01T00:00:00.000Z',
+            book: {
+              ...entryA.book,
+              title: 'Überschriebener Titel!',
+              updatedAt: '2099-01-01T00:00:00.000Z',
+            },
+          },
+          {
+            userBookId: '44444444-4444-4444-8444-444444444442',
+            status: 'unread',
+            rating: null,
+            notes: null,
+            addedAt: '2026-11-21T10:00:00.000Z',
+            startedAt: null,
+            finishedAt: null,
+            createdAt: '2026-11-21T10:00:00.000Z',
+            updatedAt: '2099-01-01T00:00:00.000Z',
+            book: {
+              id: '55555555-5555-4555-8555-555555555552',
+              title: 'Buch ohne Cover-Datei',
+              subtitle: null,
+              authors: ['Autor B'],
+              seriesName: null,
+              seriesNumber: null,
+              isbn10: null,
+              isbn13: null,
+              pageCount: 200,
+              publishedYear: 2024,
+              genres: [],
+              description: null,
+              coverKey: 'deadbeefdeadbeefdeadbeef.webp',
+              coverSourceUrl: null,
+              language: 'de',
+              publisher: null,
+              metadataSource: 'manual',
+              metadataExternalId: null,
+              createdAt: '2026-11-21T10:00:00.000Z',
+              updatedAt: '2099-01-01T00:00:00.000Z',
+              deletedAt: null,
+            },
+          },
+        ],
+      };
+
+      const importB = await app.inject({
+        method: 'POST',
+        url: '/api/import/json',
+        headers: { authorization: `Bearer ${tokenB}` },
+        payload: tamperedPayload,
+      });
+      expect(importB.statusCode).toBe(200);
+      expect(importB.json()).toEqual({
+        imported: 2,
+        updated: 0,
+        skipped: 0,
+        errors: [],
+      });
+
+      // User A sieht weiterhin unverändert den Originaltitel
+      const checkA = await app.inject({
+        method: 'GET',
+        url: `/api/library/${entryA.id}`,
+        headers: { authorization: `Bearer ${tokenA}` },
+      });
+      expect(checkA.statusCode).toBe(200);
+      expect(checkA.json().book.title).toBe('Originaltitel von User A');
+
+      // Nicht existierender coverKey wurde verworfen (null) und 2099-Timestamp gekappt
+      const checkB = await app.inject({
+        method: 'GET',
+        url: '/api/library',
+        headers: { authorization: `Bearer ${tokenB}` },
+      });
+      const itemsB = checkB.json().items as Array<{
+        updatedAt: string;
+        book: { title: string; coverKey: string | null };
+      }>;
+      const missingCoverBook = itemsB.find(
+        (item) => item.book.title === 'Buch ohne Cover-Datei'
+      );
+      expect(missingCoverBook?.book.coverKey).toBeNull();
+      expect(missingCoverBook?.updatedAt).toBe('2026-11-21T10:05:00.000Z');
+
+      const rawRow = dbCtx.sqlite
+        .prepare('SELECT updated_at FROM books WHERE id = ?')
+        .get('55555555-5555-4555-8555-555555555552') as { updated_at: string };
+      expect(rawRow.updated_at).toBe('2026-11-21T10:05:00.000Z');
+    } finally {
+      await app.close();
+    }
+  });
 });

@@ -1,4 +1,5 @@
 import type { MetadataCandidate } from '@bibliolisa/shared';
+import { SERVER_VERSION } from '../version.js';
 import {
   dedupeAuthors,
   extractSeriesFromTitle,
@@ -14,7 +15,7 @@ import {
   type MetadataProvider,
 } from './types.js';
 
-const USER_AGENT = 'Bibliolisa/0.1.0 (+https://github.com/bibliolisa)';
+const USER_AGENT = `Bibliolisa/${SERVER_VERSION} (+https://github.com/michpese/Bibliolisa)`;
 
 export interface OpenLibraryAdapterOptions {
   fetchImpl?: FetchLike;

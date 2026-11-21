@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme';
@@ -26,8 +26,13 @@ export function BookCoverImage({
 }: BookCoverImageProps) {
   const theme = useAppTheme();
   const uri = localUri || previewUrl || null;
+  const [failed, setFailed] = useState(false);
 
-  if (uri) {
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+
+  if (uri && !failed) {
     return (
       <View
         style={[
@@ -40,6 +45,7 @@ export function BookCoverImage({
           source={{ uri }}
           style={styles.image}
           resizeMode="cover"
+          onError={() => setFailed(true)}
           accessibilityLabel={`Cover von ${title}`}
         />
       </View>

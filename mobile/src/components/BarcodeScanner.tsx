@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Linking,
   Modal,
   Pressable,
   StyleSheet,
@@ -35,6 +36,13 @@ export function BarcodeScanner({
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const lockRef = useRef(false);
+
+  useEffect(() => {
+    if (visible) {
+      lockRef.current = false;
+      setHint(null);
+    }
+  }, [visible]);
 
   const handleBarcodeScanned = (result: BarcodeScanningResult) => {
     if (lockRef.current) return;
@@ -106,12 +114,19 @@ export function BarcodeScanner({
             <Text style={styles.permissionText}>
               Um den ISBN-Barcode auf der Buchrückseite zu scannen, benötigt Bibliolisa Zugriff auf die Kamera. Du kannst Bücher aber jederzeit auch manuell ohne Kamera eintragen.
             </Text>
-            {permission.canAskAgain && (
+            {permission.canAskAgain ? (
               <Pressable
                 onPress={() => void requestPermission()}
                 style={[styles.primaryBtn, { backgroundColor: theme.primary }]}
               >
                 <Text style={styles.primaryBtnText}>Kamera freigeben</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => void Linking.openSettings()}
+                style={[styles.primaryBtn, { backgroundColor: theme.primary }]}
+              >
+                <Text style={styles.primaryBtnText}>App-Einstellungen öffnen</Text>
               </Pressable>
             )}
             <Pressable onPress={handleClose} style={styles.secondaryBtn}>

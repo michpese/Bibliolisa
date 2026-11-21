@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -213,27 +215,34 @@ export function SyncStatusBadge({
         animationType="slide"
         onRequestClose={() => setModalVisible(false)}
       >
-        <Pressable
+        <KeyboardAvoidingView
           style={styles.backdrop}
-          onPress={() => setModalVisible(false)}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <Pressable
-            style={[
-              styles.sheet,
-              { backgroundColor: theme.card, borderColor: theme.border },
-            ]}
-            onPress={() => undefined}
+            style={styles.backdropInner}
+            onPress={() => setModalVisible(false)}
           >
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: theme.text }]}>
-                Synchronisations-Status
-              </Text>
-              <Pressable onPress={() => setModalVisible(false)} hitSlop={8}>
-                <Ionicons name="close" size={22} color={theme.text} />
-              </Pressable>
-            </View>
+            <Pressable
+              style={[
+                styles.sheet,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => undefined}
+            >
+              <View style={styles.sheetHeader}>
+                <Text style={[styles.sheetTitle, { color: theme.text }]}>
+                  Synchronisations-Status
+                </Text>
+                <Pressable onPress={() => setModalVisible(false)} hitSlop={8}>
+                  <Ionicons name="close" size={22} color={theme.text} />
+                </Pressable>
+              </View>
 
-            <ScrollView contentContainerStyle={styles.sheetBody}>
+              <ScrollView
+                contentContainerStyle={styles.sheetBody}
+                keyboardShouldPersistTaps="handled"
+              >
               {/* Status-Box */}
               <View
                 style={[styles.statusCard, { backgroundColor: presentation.bg }]}
@@ -408,9 +417,10 @@ export function SyncStatusBadge({
                   </Text>
                 </Pressable>
               )}
-            </ScrollView>
+              </ScrollView>
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
@@ -465,6 +475,10 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  backdropInner: {
+    flex: 1,
     justifyContent: 'flex-end',
   },
   sheet: {

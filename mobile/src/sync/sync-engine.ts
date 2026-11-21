@@ -239,6 +239,33 @@ function defaultIsNetworkError(error: unknown): boolean {
   return false;
 }
 
+function isPermanentCoverUploadError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as { status?: unknown; code?: unknown; message?: unknown };
+  if (
+    typeof err.status === 'number' &&
+    err.status >= 400 &&
+    err.status < 500 &&
+    err.status !== 401 &&
+    err.status !== 408 &&
+    err.status !== 429
+  ) {
+    return true;
+  }
+  if (err.code === 'ENOENT') {
+    return true;
+  }
+  if (
+    typeof err.message === 'string' &&
+    /enoent|no such file|does not exist|file not found/i.test(err.message)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
@@ -755,7 +782,17 @@ export class SyncEngine {
             coverNetworkOffline = true;
             break;
           }
-          // Einzelner Upload-Fehler (z. B. gelöschte lokale Temp-Datei) blockiert nicht den übrigen Sync
+          if (isPermanentCoverUploadError(error)) {
+            await db.runAsync(
+              `UPDATE books
+               SET cover_pending_upload = 0
+               WHERE id = ? AND cover_local_uri = ?`,
+              item.id,
+              item.cover_local_uri
+            );
+            dbMutated = true;
+          }
+          // Einzelner Upload-Fehler blockiert nicht den übrigen Sync
         }
       }
 

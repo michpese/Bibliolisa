@@ -70,8 +70,10 @@ FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 
 ARG APP_UID=10001
 ARG APP_GID=10001
+ARG APP_VERSION=
 
 ENV NODE_ENV=production \
+    APP_VERSION=${APP_VERSION} \
     PORT=3000 \
     HOST=0.0.0.0 \
     DATA_DIR=/data \

@@ -148,7 +148,7 @@ export function RecommendationsScreen() {
               Was lese ich als Nächstes?
             </Text>
             <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
-              100 % offline direkt aus deinem lokalen SQLite-Bestand berechnet.
+              Vorschläge aus deinem ungelesenen Stapel – auch komplett offline.
             </Text>
           </View>
           <Pressable

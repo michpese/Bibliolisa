@@ -3,7 +3,11 @@ import { parseEnv } from './config/env.js';
 
 async function main(): Promise<void> {
   const env = parseEnv();
-  const { app, dbCtx } = await buildApp({ env });
+  const { app, dbCtx, coverService } = await buildApp({ env });
+
+  void coverService.cleanupOrphanCovers().catch((error) => {
+    app.log.warn({ err: error }, 'Startup-Bereinigung verwaister Cover fehlgeschlagen.');
+  });
 
   let shuttingDown = false;
   const shutdown = async (signal: string) => {

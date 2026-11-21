@@ -47,11 +47,20 @@ describe('Webapp-Auslieferung, SPA-Fallback & Reverse-Proxy-Header', () => {
       expect(root.headers['content-type']).toContain('text/html');
       expect(root.body).toContain('Bibliolisa');
       expect(root.headers['cache-control']).toBe('no-cache');
+      expect(root.headers['x-content-type-options']).toBe('nosniff');
+      expect(root.headers['x-frame-options']).toBe('DENY');
+      expect(root.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+      expect(root.headers['permissions-policy']).toBe(
+        'camera=(), microphone=(), geolocation=()'
+      );
+      expect(root.headers['content-security-policy']).toContain("script-src 'self'");
+      expect(root.headers['strict-transport-security']).toBeUndefined();
 
       const spa = await app.inject({ method: 'GET', url: '/library/some-id?x=1' });
       expect(spa.statusCode).toBe(200);
       expect(spa.headers['content-type']).toContain('text/html');
       expect(spa.body).toContain('id="root"');
+      expect(spa.headers['content-security-policy']).toContain("default-src 'self'");
 
       const asset = await app.inject({
         method: 'GET',
@@ -59,6 +68,8 @@ describe('Webapp-Auslieferung, SPA-Fallback & Reverse-Proxy-Header', () => {
       });
       expect(asset.statusCode).toBe(200);
       expect(asset.headers['cache-control']).toContain('immutable');
+      expect(asset.headers['x-content-type-options']).toBe('nosniff');
+      expect(asset.headers['content-security-policy']).toBeUndefined();
 
       const missingAsset = await app.inject({
         method: 'GET',
@@ -69,6 +80,8 @@ describe('Webapp-Auslieferung, SPA-Fallback & Reverse-Proxy-Header', () => {
       const health = await app.inject({ method: 'GET', url: '/api/health' });
       expect(health.statusCode).toBe(200);
       expect(health.json().status).toBe('ok');
+      expect(health.headers['x-frame-options']).toBe('DENY');
+      expect(health.headers['content-security-policy']).toBeUndefined();
 
       const reg = await app.inject({
         method: 'POST',
@@ -134,6 +147,9 @@ describe('Webapp-Auslieferung, SPA-Fallback & Reverse-Proxy-Header', () => {
         payload: { username: 'plainuser', password: 'Password123!', clientType: 'web' },
       });
       expect(proxied.statusCode).toBe(200);
+      expect(proxied.headers['strict-transport-security']).toBe(
+        'max-age=31536000; includeSubDomains'
+      );
       const proxiedCookies = cookieHeaders(proxied.headers['set-cookie']);
       expect(proxiedCookies.length).toBeGreaterThanOrEqual(2);
       for (const cookie of proxiedCookies) {

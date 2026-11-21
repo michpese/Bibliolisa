@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -236,10 +238,15 @@ export function BookDetailScreen() {
   const notesChanged = (notesDraft.trim() || null) !== (entry.notes ?? null);
 
   return (
-    <ScrollView
+    <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={styles.content}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
       {/* Buch-Header */}
       <View
         style={[
@@ -513,19 +520,28 @@ export function BookDetailScreen() {
               <Ionicons name="close" size={24} color={theme.text} />
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.modalScroll}>
-            <BookForm
-              mode="edit"
-              initialValues={toEditFormValues(entry)}
-              submitLabel="Änderungen speichern"
-              submitting={savingEdit}
-              onSubmit={handleEditSubmit}
-              onCancel={() => setEditModalVisible(false)}
-            />
-          </ScrollView>
+          <KeyboardAvoidingView
+            style={styles.modalContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <ScrollView
+              contentContainerStyle={styles.modalScroll}
+              keyboardShouldPersistTaps="handled"
+            >
+              <BookForm
+                mode="edit"
+                initialValues={toEditFormValues(entry)}
+                submitLabel="Änderungen speichern"
+                submitting={savingEdit}
+                onSubmit={handleEditSubmit}
+                onCancel={() => setEditModalVisible(false)}
+              />
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -357,8 +357,14 @@ export function BookFormDialog({
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Titel *" error={errors.title} className="sm:col-span-2">
+                  <Field
+                    label="Titel *"
+                    htmlFor="book-form-title"
+                    error={errors.title}
+                    className="sm:col-span-2"
+                  >
                     <Input
+                      id="book-form-title"
                       value={form.title}
                       onChange={(e) => set('title', e.target.value)}
                       required
@@ -366,17 +372,46 @@ export function BookFormDialog({
                       aria-invalid={Boolean(errors.title)}
                     />
                   </Field>
-                  <Field label="Untertitel" className="sm:col-span-2">
-                    <Input value={form.subtitle} onChange={(e) => set('subtitle', e.target.value)} maxLength={500} />
-                  </Field>
-                  <Field label="Autor(en)" hint="Mehrere durch Komma trennen" className="sm:col-span-2">
-                    <Input value={form.authors} onChange={(e) => set('authors', e.target.value)} />
-                  </Field>
-                  <Field label="Buchreihe">
-                    <Input value={form.seriesName} onChange={(e) => set('seriesName', e.target.value)} maxLength={300} />
-                  </Field>
-                  <Field label="Band" hint="Dezimal möglich, z. B. 1,5" error={errors.seriesNumber}>
+                  <Field
+                    label="Untertitel"
+                    htmlFor="book-form-subtitle"
+                    className="sm:col-span-2"
+                  >
                     <Input
+                      id="book-form-subtitle"
+                      value={form.subtitle}
+                      onChange={(e) => set('subtitle', e.target.value)}
+                      maxLength={500}
+                    />
+                  </Field>
+                  <Field
+                    label="Autor(en)"
+                    htmlFor="book-form-authors"
+                    hint="Mehrere durch Komma trennen"
+                    className="sm:col-span-2"
+                  >
+                    <Input
+                      id="book-form-authors"
+                      value={form.authors}
+                      onChange={(e) => set('authors', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Buchreihe" htmlFor="book-form-series">
+                    <Input
+                      id="book-form-series"
+                      value={form.seriesName}
+                      onChange={(e) => set('seriesName', e.target.value)}
+                      maxLength={300}
+                    />
+                  </Field>
+                  <Field
+                    label="Band"
+                    htmlFor="book-form-series-number"
+                    hint="Dezimal möglich, z. B. 1,5"
+                    error={errors.seriesNumber}
+                  >
+                    <Input
+                      id="book-form-series-number"
                       value={form.seriesNumber}
                       onChange={(e) => set('seriesNumber', e.target.value)}
                       inputMode="decimal"
@@ -384,26 +419,81 @@ export function BookFormDialog({
                       disabled={form.seriesName.trim() === ''}
                     />
                   </Field>
-                  <Field label="ISBN (10 oder 13)" error={errors.isbn}>
-                    <Input value={form.isbn} onChange={(e) => set('isbn', e.target.value)} inputMode="numeric" />
+                  <Field
+                    label="ISBN (10 oder 13)"
+                    htmlFor="book-form-isbn"
+                    error={errors.isbn}
+                  >
+                    <Input
+                      id="book-form-isbn"
+                      value={form.isbn}
+                      onChange={(e) => set('isbn', e.target.value)}
+                      inputMode="numeric"
+                    />
                   </Field>
-                  <Field label="Verlag">
-                    <Input value={form.publisher} onChange={(e) => set('publisher', e.target.value)} maxLength={300} />
+                  <Field label="Verlag" htmlFor="book-form-publisher">
+                    <Input
+                      id="book-form-publisher"
+                      value={form.publisher}
+                      onChange={(e) => set('publisher', e.target.value)}
+                      maxLength={300}
+                    />
                   </Field>
-                  <Field label="Seiten" error={errors.pageCount}>
-                    <Input value={form.pageCount} onChange={(e) => set('pageCount', e.target.value)} inputMode="numeric" />
+                  <Field
+                    label="Seiten"
+                    htmlFor="book-form-pages"
+                    error={errors.pageCount}
+                  >
+                    <Input
+                      id="book-form-pages"
+                      value={form.pageCount}
+                      onChange={(e) => set('pageCount', e.target.value)}
+                      inputMode="numeric"
+                    />
                   </Field>
-                  <Field label="Erscheinungsjahr" error={errors.publishedYear}>
-                    <Input value={form.publishedYear} onChange={(e) => set('publishedYear', e.target.value)} inputMode="numeric" />
+                  <Field
+                    label="Erscheinungsjahr"
+                    htmlFor="book-form-year"
+                    error={errors.publishedYear}
+                  >
+                    <Input
+                      id="book-form-year"
+                      value={form.publishedYear}
+                      onChange={(e) => set('publishedYear', e.target.value)}
+                      inputMode="numeric"
+                    />
                   </Field>
-                  <Field label="Sprache" hint="z. B. de, en" error={errors.language}>
-                    <Input value={form.language} onChange={(e) => set('language', e.target.value)} maxLength={16} />
+                  <Field
+                    label="Sprache"
+                    htmlFor="book-form-language"
+                    hint="z. B. de, en"
+                    error={errors.language}
+                  >
+                    <Input
+                      id="book-form-language"
+                      value={form.language}
+                      onChange={(e) => set('language', e.target.value)}
+                      maxLength={16}
+                    />
                   </Field>
-                  <Field label="Genres / Tags" hint="Durch Komma trennen">
-                    <Input value={form.genres} onChange={(e) => set('genres', e.target.value)} />
+                  <Field
+                    label="Genres / Tags"
+                    htmlFor="book-form-genres"
+                    hint="Durch Komma trennen"
+                  >
+                    <Input
+                      id="book-form-genres"
+                      value={form.genres}
+                      onChange={(e) => set('genres', e.target.value)}
+                    />
                   </Field>
-                  <Field label="Beschreibung" className="sm:col-span-2">
+                  <Field
+                    label="Beschreibung"
+                    htmlFor="book-form-description"
+                    className="sm:col-span-2"
+                  >
                     <Textarea
+                      id="book-form-description"
                       value={form.description}
                       onChange={(e) => set('description', e.target.value)}
                       rows={4}
@@ -417,8 +507,9 @@ export function BookFormDialog({
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">{isEdit ? 'Mein Lesestand' : '3. Mein Lesestand'}</h3>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Status">
+                <Field label="Status" htmlFor="book-form-status">
                   <Select
+                    id="book-form-status"
                     value={form.status}
                     onChange={(e) => set('status', e.target.value as ReadingStatus)}
                   >
@@ -434,8 +525,13 @@ export function BookFormDialog({
                     <RatingStars value={form.rating} onChange={(value) => set('rating', value)} />
                   </div>
                 </Field>
-                <Field label="Notizen" className="sm:col-span-2">
+                <Field
+                  label="Notizen"
+                  htmlFor="book-form-notes"
+                  className="sm:col-span-2"
+                >
                   <Textarea
+                    id="book-form-notes"
                     value={form.notes}
                     onChange={(e) => set('notes', e.target.value)}
                     rows={3}
@@ -472,12 +568,14 @@ export function BookFormDialog({
 
 function Field({
   label,
+  htmlFor,
   hint,
   error,
   className,
   children,
 }: {
   label: string;
+  htmlFor?: string;
   hint?: string;
   error?: string;
   className?: string;
@@ -486,7 +584,7 @@ function Field({
   return (
     <div className={className}>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
-        <Label>{label}</Label>
+        <Label htmlFor={htmlFor}>{label}</Label>
         {hint && !error && <span className="text-[11px] text-muted-foreground">{hint}</span>}
       </div>
       {children}

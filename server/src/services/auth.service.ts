@@ -27,6 +27,9 @@ export const MEDIA_TOKEN_TTL_SECONDS = 20 * 60;
 export const WEB_REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const MOBILE_REFRESH_TTL_SECONDS = 365 * 24 * 60 * 60;
 export const REFRESH_GRACE_WINDOW_MS = 30 * 1000;
+const REFRESH_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+const DUMMY_PASSWORD_HASH = `$scrypt$n=${SCRYPT_N},r=${SCRYPT_R},p=${SCRYPT_P}$${Buffer.alloc(16, 1).toString('base64')}$${Buffer.alloc(SCRYPT_KEYLEN, 2).toString('base64')}`;
 
 function scryptAsync(
   password: string,
@@ -157,6 +160,7 @@ export class AuthService {
   private readonly secretKey: Uint8Array;
   private readonly allowRegistration: boolean;
   private readonly now: () => Date;
+  private lastPruneAtMs: number | null = null;
 
   constructor(options: AuthServiceOptions) {
     this.dbCtx = options.dbCtx;
@@ -174,6 +178,34 @@ export class AuthService {
 
   isRegistrationEffectivelyAllowed(): boolean {
     return this.allowRegistration || this.getUserCount() === 0;
+  }
+
+  pruneExpiredAndRevokedTokens(revokedRetentionDays = 7): number {
+    const nowDate = this.now();
+    const nowIso = toCanonicalIsoUtc(nowDate);
+    const cutoffIso = new Date(
+      nowDate.getTime() - revokedRetentionDays * 86_400_000
+    ).toISOString();
+
+    const info = this.dbCtx.sqlite
+      .prepare(
+        `DELETE FROM refresh_tokens
+         WHERE expires_at <= ?
+            OR (revoked_at IS NOT NULL AND revoked_at <= ?)`
+      )
+      .run(nowIso, cutoffIso);
+    this.lastPruneAtMs = nowDate.getTime();
+    return info.changes;
+  }
+
+  private maybePruneTokens(): void {
+    const nowMs = this.now().getTime();
+    if (
+      this.lastPruneAtMs === null ||
+      Math.abs(nowMs - this.lastPruneAtMs) >= REFRESH_PRUNE_INTERVAL_MS
+    ) {
+      this.pruneExpiredAndRevokedTokens();
+    }
   }
 
   async signAccessToken(
@@ -316,6 +348,14 @@ export class AuthService {
   }
 
   async register(input: RegisterRequest): Promise<IssuedAuthBundle> {
+    if (this.getUserCount() > 0 && !this.allowRegistration) {
+      throw new AppError(
+        403,
+        'REGISTRATION_DISABLED',
+        'Die Registrierung neuer Benutzer ist deaktiviert.'
+      );
+    }
+
     const passwordHash = await hashPassword(input.password);
     const nowDate = this.now();
     const nowIso = toCanonicalIsoUtc(nowDate);
@@ -405,6 +445,8 @@ export class AuthService {
       return inserted;
     })();
 
+    this.maybePruneTokens();
+
     return this.buildAuthBundle(
       createdUser,
       rawRefreshToken,
@@ -421,6 +463,8 @@ export class AuthService {
       .get();
 
     if (!userRow) {
+      // Konstantes Timing unabhängig davon, ob der Benutzername existiert
+      await verifyPassword(input.password, DUMMY_PASSWORD_HASH);
       throw new AppError(
         401,
         'INVALID_CREDENTIALS',
@@ -464,6 +508,8 @@ export class AuthService {
         createdAt: nowIso,
       })
       .run();
+
+    this.maybePruneTokens();
 
     return this.buildAuthBundle(
       userRow,

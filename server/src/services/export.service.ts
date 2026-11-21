@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
+  CoverKeySchema,
   ExportEntrySchema,
   ExportImportEnvelopeSchema,
   isbn10ToIsbn13,
@@ -12,6 +15,7 @@ import {
 import type { DatabaseContext } from '../db/client.js';
 import { AppError } from '../plugins/error-handler.js';
 import type { LibraryService } from './library.service.js';
+import { MAX_FUTURE_CLOCK_SKEW_MS } from './sync.service.js';
 
 interface UserIdentityRow {
   id: string;
@@ -23,6 +27,7 @@ interface ExistingBookMetaRow {
   id: string;
   updated_at: string;
   deleted_at: string | null;
+  created_by_user_id: string | null;
 }
 
 interface ExistingUserBookRow {
@@ -177,10 +182,31 @@ export class ExportService {
     };
   }
 
+  private resolveExistingCoverKey(coverKey: string | null): string | null {
+    if (!coverKey) {
+      return null;
+    }
+    const parsed = CoverKeySchema.safeParse(coverKey);
+    if (!parsed.success) {
+      return null;
+    }
+    const resolvedDir = path.resolve(this.dbCtx.coversDir);
+    const targetPath = path.resolve(resolvedDir, parsed.data);
+    if (!targetPath.startsWith(resolvedDir + path.sep)) {
+      return null;
+    }
+    return fs.existsSync(targetPath) ? parsed.data : null;
+  }
+
   importJson(userId: string, rawBody: unknown): ImportResult {
     const envelope = ExportImportEnvelopeSchema.parse(rawBody);
     const nowDate = this.now();
     const nowIso = toCanonicalIsoUtc(nowDate);
+    const maxAllowedUpdatedAtIso = new Date(
+      nowDate.getTime() + MAX_FUTURE_CLOCK_SKEW_MS
+    ).toISOString();
+    const clampUpdatedAt = (rawIso: string): string =>
+      rawIso > maxAllowedUpdatedAtIso ? maxAllowedUpdatedAtIso : rawIso;
 
     return this.dbCtx.sqlite.transaction((): ImportResult => {
       let imported = 0;
@@ -189,13 +215,19 @@ export class ExportService {
       const errors: Array<{ index: number; message: string }> = [];
 
       const selectBookByIdStmt = this.dbCtx.sqlite.prepare(
-        'SELECT id, updated_at, deleted_at FROM books WHERE id = ?'
+        'SELECT id, updated_at, deleted_at, created_by_user_id FROM books WHERE id = ?'
       );
       const selectBookByIsbn13Stmt = this.dbCtx.sqlite.prepare(
-        'SELECT id, updated_at, deleted_at FROM books WHERE isbn_13 = ? AND deleted_at IS NULL LIMIT 1'
+        'SELECT id, updated_at, deleted_at, created_by_user_id FROM books WHERE isbn_13 = ? AND deleted_at IS NULL LIMIT 1'
       );
       const selectBookByIsbn10Stmt = this.dbCtx.sqlite.prepare(
-        'SELECT id, updated_at, deleted_at FROM books WHERE isbn_10 = ? AND deleted_at IS NULL LIMIT 1'
+        'SELECT id, updated_at, deleted_at, created_by_user_id FROM books WHERE isbn_10 = ? AND deleted_at IS NULL LIMIT 1'
+      );
+      const userHasBookRefStmt = this.dbCtx.sqlite.prepare(
+        'SELECT 1 FROM user_books WHERE user_id = ? AND book_id = ? LIMIT 1'
+      );
+      const otherUserHasBookRefStmt = this.dbCtx.sqlite.prepare(
+        'SELECT 1 FROM user_books WHERE book_id = ? AND user_id != ? LIMIT 1'
       );
       const insertBookStmt = this.dbCtx.sqlite.prepare(
         `INSERT INTO books (
@@ -300,10 +332,24 @@ export class ExportService {
             | undefined;
         }
 
+        const effectiveBookUpdatedAt = clampUpdatedAt(book.updatedAt);
+        const effectiveEntryUpdatedAt = clampUpdatedAt(entry.updatedAt);
+        const resolvedCoverKey = this.resolveExistingCoverKey(book.coverKey);
+
         let resolvedBookId: string;
         if (matchedBook) {
           resolvedBookId = matchedBook.id;
-          if (book.updatedAt > matchedBook.updated_at) {
+          const userHasRef = Boolean(
+            userHasBookRefStmt.get(userId, resolvedBookId)
+          );
+          const otherUserHasRef = Boolean(
+            otherUserHasBookRefStmt.get(resolvedBookId, userId)
+          );
+          const canUpdateBook =
+            matchedBook.created_by_user_id === userId ||
+            (userHasRef && !otherUserHasRef);
+
+          if (canUpdateBook && effectiveBookUpdatedAt > matchedBook.updated_at) {
             updateBookStmt.run(
               book.title,
               book.subtitle,
@@ -317,13 +363,13 @@ export class ExportService {
               book.publishedYear,
               JSON.stringify(book.genres),
               book.description,
-              book.coverKey,
+              resolvedCoverKey,
               book.coverSourceUrl,
               book.language,
               book.publisher,
               book.metadataSource,
               book.metadataExternalId,
-              book.updatedAt,
+              effectiveBookUpdatedAt,
               this.dbCtx.nextServerTimestamp(nowDate),
               resolvedBookId
             );
@@ -347,7 +393,7 @@ export class ExportService {
             book.publishedYear,
             JSON.stringify(book.genres),
             book.description,
-            book.coverKey,
+            resolvedCoverKey,
             book.coverSourceUrl,
             book.language,
             book.publisher,
@@ -355,7 +401,7 @@ export class ExportService {
             book.metadataExternalId,
             userId,
             book.createdAt,
-            book.updatedAt,
+            effectiveBookUpdatedAt,
             this.dbCtx.nextServerTimestamp(nowDate)
           );
         }
@@ -374,7 +420,7 @@ export class ExportService {
             activeUb.started_at === entry.startedAt &&
             activeUb.finished_at === entry.finishedAt;
 
-          if (!isSameContent && entry.updatedAt > activeUb.updated_at) {
+          if (!isSameContent && effectiveEntryUpdatedAt > activeUb.updated_at) {
             updateUserBookStmt.run(
               entry.status,
               entry.rating,
@@ -382,7 +428,7 @@ export class ExportService {
               entry.addedAt,
               entry.startedAt,
               entry.finishedAt,
-              entry.updatedAt,
+              effectiveEntryUpdatedAt,
               this.dbCtx.nextServerTimestamp(nowDate),
               activeUb.id,
               userId
@@ -404,7 +450,7 @@ export class ExportService {
 
         if (deletedUb) {
           const restoredUpdatedAt =
-            entry.updatedAt > nowIso ? entry.updatedAt : nowIso;
+            effectiveEntryUpdatedAt > nowIso ? effectiveEntryUpdatedAt : nowIso;
           updateUserBookStmt.run(
             entry.status,
             entry.rating,
@@ -437,7 +483,7 @@ export class ExportService {
           entry.startedAt,
           entry.finishedAt,
           entry.createdAt,
-          entry.updatedAt,
+          effectiveEntryUpdatedAt,
           this.dbCtx.nextServerTimestamp(nowDate)
         );
         imported += 1;

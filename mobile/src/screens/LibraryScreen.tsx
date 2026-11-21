@@ -66,6 +66,7 @@ export function LibraryScreen() {
   const { snapshot: syncSnapshot, syncNow } = useSyncContext();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<ReadingStatus | undefined>(undefined);
   const [genreFilter, setGenreFilter] = useState<string | undefined>(undefined);
   const [seriesFilter, setSeriesFilter] = useState<string | undefined>(undefined);
@@ -81,11 +82,23 @@ export function LibraryScreen() {
 
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [filterSearch, setFilterSearch] = useState('');
+
+  useEffect(() => {
+    if (searchQuery === '') {
+      setDebouncedSearchQuery('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const loadData = useCallback(async () => {
     if (!db || !userId) return;
     const filters: LocalLibraryFilters = {
-      q: searchQuery.trim() || undefined,
+      q: debouncedSearchQuery.trim() || undefined,
       status: statusFilter,
       genre: genreFilter,
       series: seriesFilter,
@@ -94,24 +107,26 @@ export function LibraryScreen() {
       sort: sortField,
       order: sortOrder,
     };
-    const [nextEntries, nextFacets] = await Promise.all([
-      listLocalLibraryEntries(db, userId, filters),
-      getLocalLibraryFacets(db, userId),
-    ]);
+    const nextEntries = await listLocalLibraryEntries(db, userId, filters);
     setEntries(nextEntries);
-    setFacets(nextFacets);
   }, [
     authorFilter,
     db,
+    debouncedSearchQuery,
     genreFilter,
     minRatingFilter,
-    searchQuery,
     seriesFilter,
     sortField,
     sortOrder,
     statusFilter,
     userId,
   ]);
+
+  const loadFacets = useCallback(async () => {
+    if (!db || !userId) return;
+    const nextFacets = await getLocalLibraryFacets(db, userId);
+    setFacets(nextFacets);
+  }, [db, userId]);
 
   useEffect(() => {
     let active = true;
@@ -127,13 +142,17 @@ export function LibraryScreen() {
     };
   }, [loadData, libraryVersion]);
 
+  useEffect(() => {
+    void loadFacets();
+  }, [loadFacets, libraryVersion]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       if (isAuthenticated) {
         await syncNow('pull_to_refresh');
       }
-      await loadData();
+      await Promise.all([loadData(), loadFacets()]);
     } finally {
       setRefreshing(false);
     }
@@ -152,10 +171,29 @@ export function LibraryScreen() {
     setAuthorFilter(undefined);
     setMinRatingFilter(undefined);
     setSearchQuery('');
+    setDebouncedSearchQuery('');
+    setFilterSearch('');
   };
 
   const currentSortLabel =
     SORT_OPTIONS.find((opt) => opt.value === sortField)?.label ?? 'Reihe';
+
+  const normalizedFilterSearch = filterSearch.trim().toLowerCase();
+  const filteredSeriesFacets = (facets?.series ?? []).filter((s) =>
+    normalizedFilterSearch === ''
+      ? true
+      : s.value.toLowerCase().includes(normalizedFilterSearch)
+  );
+  const filteredGenreFacets = (facets?.genres ?? []).filter((g) =>
+    normalizedFilterSearch === ''
+      ? true
+      : g.value.toLowerCase().includes(normalizedFilterSearch)
+  );
+  const filteredAuthorFacets = (facets?.authors ?? []).filter((a) =>
+    normalizedFilterSearch === ''
+      ? true
+      : a.value.toLowerCase().includes(normalizedFilterSearch)
+  );
 
   return (
     <SafeAreaView
@@ -350,7 +388,10 @@ export function LibraryScreen() {
         </Pressable>
 
         <Pressable
-          onPress={() => setFilterModalVisible(true)}
+          onPress={() => {
+            setFilterSearch('');
+            setFilterModalVisible(true);
+          }}
           style={[
             styles.toolbarBtn,
             {
@@ -633,7 +674,32 @@ export function LibraryScreen() {
               </Pressable>
             </View>
 
-            <ScrollView contentContainerStyle={styles.filterScroll}>
+            <View
+              style={[
+                styles.filterSearchBox,
+                { backgroundColor: theme.background, borderColor: theme.border },
+              ]}
+            >
+              <Ionicons name="search-outline" size={16} color={theme.textMuted} />
+              <TextInput
+                value={filterSearch}
+                onChangeText={setFilterSearch}
+                placeholder="Reihe, Genre oder Autor filtern…"
+                placeholderTextColor={theme.textMuted}
+                style={[styles.filterSearchInput, { color: theme.text }]}
+                autoCorrect={false}
+              />
+              {filterSearch.length > 0 && (
+                <Pressable onPress={() => setFilterSearch('')} hitSlop={8}>
+                  <Ionicons name="close-circle" size={16} color={theme.textMuted} />
+                </Pressable>
+              )}
+            </View>
+
+            <ScrollView
+              contentContainerStyle={styles.filterScroll}
+              keyboardShouldPersistTaps="handled"
+            >
               <Text style={[styles.filterGroupTitle, { color: theme.text }]}>
                 Mindestbewertung
               </Text>
@@ -667,13 +733,13 @@ export function LibraryScreen() {
                 })}
               </View>
 
-              {facets && facets.series.length > 0 && (
+              {filteredSeriesFacets.length > 0 && (
                 <>
                   <Text style={[styles.filterGroupTitle, { color: theme.text }]}>
                     Buchreihe
                   </Text>
                   <View style={styles.wrapRow}>
-                    {facets.series.slice(0, 20).map((s) => {
+                    {filteredSeriesFacets.map((s) => {
                       const selected =
                         seriesFilter?.toLowerCase() === s.value.toLowerCase();
                       return (
@@ -713,13 +779,13 @@ export function LibraryScreen() {
                 </>
               )}
 
-              {facets && facets.genres.length > 0 && (
+              {filteredGenreFacets.length > 0 && (
                 <>
                   <Text style={[styles.filterGroupTitle, { color: theme.text }]}>
                     Genre / Tag
                   </Text>
                   <View style={styles.wrapRow}>
-                    {facets.genres.slice(0, 20).map((g) => {
+                    {filteredGenreFacets.map((g) => {
                       const selected =
                         genreFilter?.toLowerCase() === g.value.toLowerCase();
                       return (
@@ -759,13 +825,13 @@ export function LibraryScreen() {
                 </>
               )}
 
-              {facets && facets.authors.length > 0 && (
+              {filteredAuthorFacets.length > 0 && (
                 <>
                   <Text style={[styles.filterGroupTitle, { color: theme.text }]}>
                     Autor
                   </Text>
                   <View style={styles.wrapRow}>
-                    {facets.authors.slice(0, 20).map((a) => {
+                    {filteredAuthorFacets.map((a) => {
                       const selected =
                         authorFilter?.toLowerCase() === a.value.toLowerCase();
                       return (
@@ -804,6 +870,15 @@ export function LibraryScreen() {
                   </View>
                 </>
               )}
+
+              {normalizedFilterSearch !== '' &&
+                filteredSeriesFacets.length === 0 &&
+                filteredGenreFacets.length === 0 &&
+                filteredAuthorFacets.length === 0 && (
+                  <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+                    Keine passenden Reihen, Genres oder Autoren gefunden.
+                  </Text>
+                )}
             </ScrollView>
 
             <View style={styles.filterFooter}>
@@ -813,6 +888,7 @@ export function LibraryScreen() {
                   setSeriesFilter(undefined);
                   setAuthorFilter(undefined);
                   setMinRatingFilter(undefined);
+                  setFilterSearch('');
                 }}
                 style={[styles.footerBtn, { borderColor: theme.border, borderWidth: 1 }]}
               >
@@ -1119,6 +1195,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
+  },
+  filterSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  filterSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    padding: 0,
   },
   filterScroll: {
     gap: 12,

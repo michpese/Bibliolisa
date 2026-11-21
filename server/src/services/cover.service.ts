@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import { lookup as dnsLookup } from 'node:dns/promises';
+import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import path from 'node:path';
 import {
@@ -12,6 +15,7 @@ import sharp, { type Metadata as SharpMetadata } from 'sharp';
 import type { DatabaseContext } from '../db/client.js';
 import type { FetchLike } from '../metadata/types.js';
 import { AppError } from '../plugins/error-handler.js';
+import { SERVER_VERSION } from '../version.js';
 
 export interface DnsAddressRecord {
   address: string;
@@ -210,10 +214,169 @@ export function isBlockedIpAddress(rawIp: string): boolean {
   return true;
 }
 
+export interface ValidatedSsrfTarget {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+}
+
+export type PinnedHttpResult =
+  | { kind: 'ok'; buffer: Buffer }
+  | { kind: 'redirect'; status: number; location: string | null }
+  | { kind: 'http_error'; status: number };
+
+/**
+ * Führt einen HTTP(S)-GET-Request aus und pinnt die Socket-Verbindung über `lookup`
+ * zwingend auf die zuvor geprüfte IP-Adresse (verhindert DNS-Rebinding / TOCTOU).
+ */
+export function pinnedHttpDownload(params: {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+  maxDownloadBytes: number;
+  signal: AbortSignal;
+  userAgent: string;
+}): Promise<PinnedHttpResult> {
+  const { url, address, family, maxDownloadBytes, signal, userAgent } = params;
+
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      const abortErr = new DOMException('Aborted', 'AbortError');
+      req.destroy(abortErr);
+      finishReject(abortErr);
+    };
+
+    const finishResolve = (result: PinnedHttpResult) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+
+    const finishReject = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      reject(err);
+    };
+
+    const bareHost = url.hostname.replace(/^\[|\]$/g, '');
+    const isHttps = url.protocol === 'https:';
+
+    const lookup: net.LookupFunction = (_hostname, opts, cb) => {
+      if (opts && opts.all) {
+        cb(null, [{ address, family }]);
+        return;
+      }
+      cb(null, address, family);
+    };
+
+    const baseOptions: http.RequestOptions = {
+      method: 'GET',
+      lookup,
+      headers: {
+        Accept: 'image/webp,image/png,image/jpeg,image/*;q=0.8',
+        'User-Agent': userAgent,
+      },
+    };
+
+    const onResponse = (res: http.IncomingMessage) => {
+      const status = res.statusCode ?? 0;
+
+      if (status >= 300 && status < 400) {
+        const location =
+          typeof res.headers.location === 'string' ? res.headers.location : null;
+        res.resume();
+        finishResolve({ kind: 'redirect', status, location });
+        return;
+      }
+
+      if (status < 200 || status >= 300) {
+        res.resume();
+        finishResolve({ kind: 'http_error', status });
+        return;
+      }
+
+      const contentLengthHeader = res.headers['content-length'];
+      const contentLengthRaw = Array.isArray(contentLengthHeader)
+        ? contentLengthHeader[0]
+        : contentLengthHeader;
+      if (contentLengthRaw) {
+        const declaredSize = Number(contentLengthRaw);
+        if (Number.isFinite(declaredSize) && declaredSize > maxDownloadBytes) {
+          res.destroy();
+          req.destroy();
+          finishReject(
+            new AppError(
+              413,
+              'COVER_TOO_LARGE',
+              'Cover überschreitet das maximale Download-Limit von 10 MB.'
+            )
+          );
+          return;
+        }
+      }
+
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+
+      res.on('data', (chunk: Buffer | string) => {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        totalBytes += buf.byteLength;
+        if (totalBytes > maxDownloadBytes) {
+          res.destroy();
+          req.destroy();
+          finishReject(
+            new AppError(
+              413,
+              'COVER_TOO_LARGE',
+              'Cover überschreitet das maximale Download-Limit von 10 MB.'
+            )
+          );
+          return;
+        }
+        chunks.push(buf);
+      });
+
+      res.on('end', () => {
+        finishResolve({ kind: 'ok', buffer: Buffer.concat(chunks, totalBytes) });
+      });
+
+      res.on('error', (err) => {
+        finishReject(err);
+      });
+    };
+
+    const req = isHttps
+      ? https.request(
+          url,
+          {
+            ...baseOptions,
+            ...(net.isIP(bareHost) === 0 ? { servername: bareHost } : {}),
+          },
+          onResponse
+        )
+      : http.request(url, baseOptions, onResponse);
+
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    req.on('error', (err) => {
+      finishReject(err);
+    });
+
+    req.end();
+  });
+}
+
 export class CoverService {
   private readonly dbCtx: DatabaseContext;
   private readonly now: () => Date;
-  private readonly fetchImpl: FetchLike;
+  private readonly customFetchImpl?: FetchLike;
   private readonly dnsLookup: DnsLookupFn;
   private readonly fetchTimeoutMs: number;
   private readonly maxDownloadBytes: number;
@@ -223,7 +386,7 @@ export class CoverService {
   constructor(options: CoverServiceOptions) {
     this.dbCtx = options.dbCtx;
     this.now = options.now ?? (() => new Date());
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
+    this.customFetchImpl = options.fetchImpl;
     this.dnsLookup = options.dnsLookup ?? defaultDnsLookup;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? 8000;
     this.maxDownloadBytes = options.maxDownloadBytes ?? 10 * 1024 * 1024;
@@ -252,7 +415,7 @@ export class CoverService {
     }
   }
 
-  async validateUrlForSsrf(rawUrl: string): Promise<URL> {
+  async validateUrlForSsrf(rawUrl: string): Promise<ValidatedSsrfTarget> {
     let parsed: URL;
     try {
       parsed = new URL(rawUrl);
@@ -291,7 +454,8 @@ export class CoverService {
       );
     }
 
-    if (net.isIP(bareHost) !== 0) {
+    const literalIpVersion = net.isIP(bareHost);
+    if (literalIpVersion !== 0) {
       if (isBlockedIpAddress(bareHost)) {
         throw new AppError(
           400,
@@ -299,7 +463,11 @@ export class CoverService {
           'Die angegebene IP-Adresse ist aus Sicherheitsgründen blockiert.'
         );
       }
-      return parsed;
+      return {
+        url: parsed,
+        address: bareHost,
+        family: literalIpVersion === 6 ? 6 : 4,
+      };
     }
 
     let resolved: DnsAddressRecord[];
@@ -331,7 +499,15 @@ export class CoverService {
       }
     }
 
-    return parsed;
+    const chosen = resolved[0]!;
+    const family: 4 | 6 =
+      chosen.family === 6 || net.isIP(chosen.address) === 6 ? 6 : 4;
+
+    return {
+      url: parsed,
+      address: chosen.address,
+      family,
+    };
   }
 
   private async downloadWithSsrfProtection(rawUrl: string): Promise<Buffer> {
@@ -339,23 +515,90 @@ export class CoverService {
     const timer = setTimeout(() => {
       controller.abort();
     }, this.fetchTimeoutMs);
+    const userAgent = `Bibliolisa/${SERVER_VERSION} (+https://github.com/michpese/Bibliolisa)`;
 
     try {
       let currentUrl = rawUrl;
       let redirects = 0;
 
       while (true) {
-        await this.validateUrlForSsrf(currentUrl);
+        const target = await this.validateUrlForSsrf(currentUrl);
+
+        if (!this.customFetchImpl) {
+          let result: PinnedHttpResult;
+          try {
+            result = await pinnedHttpDownload({
+              url: target.url,
+              address: target.address,
+              family: target.family,
+              maxDownloadBytes: this.maxDownloadBytes,
+              signal: controller.signal,
+              userAgent,
+            });
+          } catch (error) {
+            if (error instanceof AppError) {
+              throw error;
+            }
+            const isTimeout =
+              controller.signal.aborted ||
+              (error instanceof Error && error.name === 'AbortError');
+            throw new AppError(
+              isTimeout ? 504 : 502,
+              isTimeout ? 'COVER_FETCH_TIMEOUT' : 'COVER_FETCH_FAILED',
+              isTimeout
+                ? 'Zeitüberschreitung beim Herunterladen des Covers.'
+                : 'Cover konnte nicht heruntergeladen werden.'
+            );
+          }
+
+          if (result.kind === 'redirect') {
+            if (redirects >= this.maxRedirects) {
+              throw new AppError(
+                400,
+                'TOO_MANY_REDIRECTS',
+                'Zu viele Weiterleitungen beim Cover-Abruf.'
+              );
+            }
+            if (!result.location) {
+              throw new AppError(
+                502,
+                'COVER_FETCH_FAILED',
+                'Ungültige Weiterleitung ohne Ziel-Header.'
+              );
+            }
+            try {
+              currentUrl = new URL(result.location, currentUrl).toString();
+            } catch {
+              throw new AppError(
+                502,
+                'COVER_FETCH_FAILED',
+                'Ungültige Weiterleitungs-URL.'
+              );
+            }
+            redirects += 1;
+            continue;
+          }
+
+          if (result.kind === 'http_error') {
+            throw new AppError(
+              502,
+              'COVER_FETCH_FAILED',
+              `Cover-Server antwortete mit HTTP ${result.status}.`
+            );
+          }
+
+          return result.buffer;
+        }
 
         let response: Response;
         try {
-          response = await this.fetchImpl(currentUrl, {
+          response = await this.customFetchImpl(currentUrl, {
             method: 'GET',
             redirect: 'manual',
             signal: controller.signal,
             headers: {
               Accept: 'image/webp,image/png,image/jpeg,image/*;q=0.8',
-              'User-Agent': 'Bibliolisa/0.1.0 (+https://github.com/bibliolisa)',
+              'User-Agent': userAgent,
             },
           });
         } catch (error) {
@@ -391,7 +634,15 @@ export class CoverService {
               'Ungültige Weiterleitung ohne Ziel-Header.'
             );
           }
-          currentUrl = new URL(location, currentUrl).toString();
+          try {
+            currentUrl = new URL(location, currentUrl).toString();
+          } catch {
+            throw new AppError(
+              502,
+              'COVER_FETCH_FAILED',
+              'Ungültige Weiterleitungs-URL.'
+            );
+          }
           redirects += 1;
           continue;
         }
@@ -654,5 +905,50 @@ export class CoverService {
       }
       throw error;
     }
+  }
+
+  async cleanupOrphanCovers(minAgeMs = 60_000): Promise<number> {
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(this.dbCtx.coversDir, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return 0;
+      }
+      throw error;
+    }
+
+    const rows = this.dbCtx.sqlite
+      .prepare('SELECT DISTINCT cover_key FROM books WHERE cover_key IS NOT NULL')
+      .all() as Array<{ cover_key: string }>;
+    const referencedKeys = new Set(rows.map((r) => r.cover_key));
+
+    const cutoffMs = this.now().getTime() - minAgeMs;
+    let removed = 0;
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.webp')) {
+        continue;
+      }
+      if (referencedKeys.has(entry.name)) {
+        continue;
+      }
+
+      const filePath = path.join(this.dbCtx.coversDir, entry.name);
+      try {
+        if (minAgeMs > 0) {
+          const stat = await fs.stat(filePath);
+          if (stat.mtimeMs > cutoffMs) {
+            continue;
+          }
+        }
+        await fs.unlink(filePath);
+        removed += 1;
+      } catch {
+        // Best-Effort beim Aufräumen
+      }
+    }
+
+    return removed;
   }
 }

@@ -116,13 +116,19 @@ jobs:
               : `${baseVersion}-dev.${runNumber}`;
 
             let versionCode = runNumber;
-            const semverMatch = /^(\d+)\.(\d+)\.(\d+)/.exec(versionName);
+            const semverMatch = /^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z0-9.-]+))?/.exec(versionName);
             if (semverMatch) {
               const major = Number(semverMatch[1]);
               const minor = Number(semverMatch[2]);
               const patch = Number(semverMatch[3]);
+              const pre = semverMatch[4] || "";
               if (minor < 100 && patch < 100) {
-                versionCode = Math.max(1, major * 10000 + minor * 100 + patch);
+                let preOffset = 99;
+                if (pre) {
+                  const numMatch = /(\d+)$/.exec(pre);
+                  preOffset = numMatch ? Math.max(1, Math.min(98, Number(numMatch[1]))) : 1;
+                }
+                versionCode = Math.max(1, major * 1000000 + minor * 10000 + patch * 100 + preOffset);
               }
             }
 

@@ -16,8 +16,8 @@ export const SyncRequestSchema = z.object({
   limit: z.number().int().min(1).max(500).default(100),
   changes: z
     .object({
-      books: z.array(SyncBookPayloadSchema).default([]),
-      userBooks: z.array(SyncUserBookPushSchema).default([]),
+      books: z.array(SyncBookPayloadSchema).max(500).default([]),
+      userBooks: z.array(SyncUserBookPushSchema).max(500).default([]),
     })
     .default({ books: [], userBooks: [] }),
 });
