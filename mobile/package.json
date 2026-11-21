@@ -1,0 +1,46 @@
+{
+  "name": "@bibliolisa/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "export:android": "expo export --platform android",
+    "prebuild:android": "expo prebuild --platform android --no-install",
+    "build": "tsc -p tsconfig.json --noEmit && expo export --platform android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@bibliolisa/shared": "workspace:*",
+    "@expo/vector-icons": "^15.0.0",
+    "@react-navigation/bottom-tabs": "^7.3.0",
+    "@react-navigation/native": "^7.1.0",
+    "@react-navigation/native-stack": "^7.3.0",
+    "expo": "~54.0.0",
+    "expo-camera": "~17.0.0",
+    "expo-crypto": "~15.0.0",
+    "expo-file-system": "~19.0.0",
+    "expo-image-picker": "~17.0.0",
+    "expo-network": "~8.0.0",
+    "expo-secure-store": "~15.0.0",
+    "expo-sqlite": "~16.0.0",
+    "expo-status-bar": "~3.0.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/react": "~19.1.0",
+    "babel-preset-expo": "~54.0.0",
+    "better-sqlite3": "^11.8.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
