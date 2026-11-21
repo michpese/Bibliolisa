@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.turbo/
+
+# Environment & local secrets
+.env
+.env.local
+.env.*.local
+
+# Persistent runtime data & SQLite files
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Coverage & logs
+coverage/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Mobile / Expo
+.expo/
+mobile/android/
+mobile/ios/
+
+# OS files
+.DS_Store
+Thumbs.db

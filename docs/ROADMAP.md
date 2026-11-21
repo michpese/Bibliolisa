@@ -10,7 +10,7 @@
 
 | Phase | Titel | Status | Kernziel | Verifikations-Gate |
 | :--- | :--- | :--- | :--- | :--- |
-| **Phase 1** | Monorepo-Fundament, Shared Contracts & Backend Core | `Offen` | pnpm-Workspace, `/shared`, SQLite (WAL) + Drizzle, `scrypt`/JWT Auth, Bibliothek-CRUD | `pnpm test` + `pnpm build` (`shared`, `server`) |
+| **Phase 1** | Monorepo-Fundament, Shared Contracts & Backend Core | `Abgeschlossen` | pnpm-Workspace, `/shared`, SQLite (WAL) + Drizzle, `scrypt`/JWT Auth, Bibliothek-CRUD | `pnpm test` + `pnpm build` (`shared`, `server`) |
 | **Phase 2** | Metadaten-Provider, Cover-Cache, Delta-Sync, Empfehlungen & Export | `Offen` | 3 Provider + Aggregator, SSRF-sicherer Cover-Cache, `POST /api/sync`, Empfehlungen, JSON/CSV | Mock-Provider-, SSRF-, Sync-Konflikt- & Export-Tests |
 | **Phase 3** | Webapp (`/web`) & Docker Single-Container-Deployment | `Offen` | Vollständige React-Webapp (Verwaltung, Empfehlungen, Backup), Multi-Stage `Dockerfile` | `web` Build + Docker-Image-Build + Container-Smoke-Test |
 | **Phase 4** | Offline-First Android-App (`/mobile`) | `Offen` | `expo-sqlite`, Offline-CRUD, Kamera-ISBN-Scanner, Offline-Empfehlungen, Settings & Test-Button | Typecheck + Expo/Metro-Bundle + Flugmodus-Funktionstest |
@@ -22,30 +22,30 @@
 
 ### Aufgaben-Checkliste
 
-- [ ] **Monorepo & Tooling einrichten:**
+- [x] **Monorepo & Tooling einrichten:**
   - `pnpm-workspace.yaml`, Root-`package.json`, `tsconfig.base.json`, `.gitignore`, `.env.example` gemäß `docs/ARCHITECTURE.md` anlegen.
-- [ ] **Paket `@bibliolisa/shared` implementieren:**
+- [x] **Paket `@bibliolisa/shared` implementieren:**
   - Alle Zod-Schemas & TypeScript-Typen (`common.ts`, `auth.ts`, `book.ts`, `user-book.ts`, `sync.ts`, `metadata.ts`, `recommendation.ts`, `export.ts`) ohne duplizierte DTOs bereitstellen.
   - `isbn.ts`: Normalisierung, Prüfziffervalidierung (ISBN-10 & ISBN-13) und Konvertierung `ISBN-10 <-> ISBN-13`.
   - `sort.ts`: Deterministische Sortier-Comparatoren inkl. Buchreihen-Sortierung mit Dezimalbänden (`1, 1.5, 2, 10`).
   - `recommendations/engine.ts`: Reine, seiteneffektfreie Empfehlungs-Engine (Stufe 1–3) inkl. Unit-Tests.
-- [ ] **Server-Basis & SQLite-Datenbank (`/server`):**
+- [x] **Server-Basis & SQLite-Datenbank (`/server`):**
   - Zod-validierte Umgebungskonfiguration (`env.ts`) inkl. Prüfung auf `JWT_SECRET` (mind. 32 Zeichen), `DATA_DIR` und `TRUST_PROXY`.
   - Fastify-5-Instanz (`app.ts`) mit `trustProxy: true`, `@fastify/cookie`, `@fastify/rate-limit` und einheitlichem Fehlerformat.
   - `better-sqlite3` mit `WAL`-Mode, `foreign_keys = ON`, `busy_timeout = 5000`, Shutdown-Checkpoint (`wal_checkpoint(TRUNCATE)`) sowie Drizzle-Schema (`users`, `refresh_tokens`, `books`, `user_books`) inkl. initialer SQL-Migration und partiellem Unique-Index `idx_user_books_active_unique`.
-- [ ] **Authentifizierung & Multi-User-Schutz:**
+- [x] **Authentifizierung & Multi-User-Schutz:**
   - Passwort-Hashing mit `crypto.scrypt` (`N=32768, r=8, p=1`, `timingSafeEqual`).
   - `POST /api/auth/register` (erster User = `admin`, `ALLOW_REGISTRATION`-Steuerung), `POST /api/auth/login`, `POST /api/auth/refresh` (Rotation + 30s Grace-Window + Reuse-Detection), `POST /api/auth/logout`, `GET /api/auth/me`, `GET/DELETE /api/auth/sessions`, `POST /api/auth/change-password`.
   - Web-Cookies (`bibliolisa_refresh`, `bibliolisa_media`) mit dynamischem `Secure`-Flag bei `https` über `X-Forwarded-Proto`.
   - Globaler Fastify `onRequest`-Auth-Guard (lässt ausschließlich `/api/health`, `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh` unauthentifiziert).
-- [ ] **System & Bibliothek-CRUD:**
+- [x] **System & Bibliothek-CRUD:**
   - `GET /api/health` (schnelle DB-Prüfung, Serverversion, `allowRegistration`, Provider-Status).
   - `GET /api/library` (alle Filter: `q`, `status`, `genre`, `author`, `series`, `minRating`, `maxRating`; alle Sortierungen: `series`, `author`, `title`, `status`, `added_at`, `rating`, `published_year`), `GET /api/library/facets`, `GET /api/library/:userBookId`, `POST /api/library`, `PATCH /api/library/:userBookId`, `DELETE /api/library/:userBookId` (Soft Delete via `deleted_at`), `POST /api/library/:userBookId/restore`.
 
 ### Verifikations-Check (Phase 1)
 
-- [ ] `pnpm --filter @bibliolisa/shared test` und `pnpm --filter @bibliolisa/shared build` laufen fehlerfrei durch.
-- [ ] `pnpm --filter @bibliolisa/server test` und `pnpm --filter @bibliolisa/server build` laufen fehlerfrei durch (inkl. In-Memory/Temp-SQLite-Integrationstests für Auth, Multi-User-Isolation, CRUD, Sortierung & Soft-Delete).
+- [x] `pnpm --filter @bibliolisa/shared test` und `pnpm --filter @bibliolisa/shared build` laufen fehlerfrei durch.
+- [x] `pnpm --filter @bibliolisa/server test` und `pnpm --filter @bibliolisa/server build` laufen fehlerfrei durch (inkl. In-Memory/Temp-SQLite-Integrationstests für Auth, Multi-User-Isolation, CRUD, Sortierung & Soft-Delete).
 
 ### Akzeptanzkriterien (Phase 1)
 
@@ -56,7 +56,10 @@
 5. Refresh-Token-Rotation akzeptiert einen Retry innerhalb von `30 s` (`grace_until`) und widerruft bei spätem Replay die Session-Kette.
 
 ### Abweichungen / Notizen
-- *Noch keine (Phase noch nicht gestartet).*
+- Bei `crypto.scrypt` (`N=32768, r=8, p=1`) wurde explizit `maxmem: 64 * 1024 * 1024` gesetzt, da Node.js' Standard-Limit (`32 MiB`) andernfalls überschritten wird.
+- `POST /api/auth/refresh` erneuert bei Web-Clients (`client_type = 'web'`) neben `bibliolisa_refresh` auch das kurzlebige `bibliolisa_media`-Cookie (`Path=/api/covers`, `scope: 'media:read'`).
+- Für HS256-JWT-Signierung und -Verifizierung kommt `jose` zum Einsatz; `package.json` konfiguriert `pnpm.onlyBuiltDependencies` für `better-sqlite3` und `esbuild`.
+- Verifikation nach Abschluss (Phase 1): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (2 Testdateien, 10 Tests) inkl. Typechecks und Builds vollständig grün.
 
 ---
 
