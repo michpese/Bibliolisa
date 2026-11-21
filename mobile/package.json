@@ -11,6 +11,7 @@
     "export:android": "expo export --platform android",
     "prebuild:android": "expo prebuild --platform android --no-install",
     "build": "tsc -p tsconfig.json --noEmit && expo export --platform android",
+    "eas-build-post-install": "pnpm --filter @bibliolisa/shared build",
     "ios": "expo run:ios"
   },
   "dependencies": {

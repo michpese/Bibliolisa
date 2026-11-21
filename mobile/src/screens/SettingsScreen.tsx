@@ -11,14 +11,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import { useAppContext } from '../context/AppContext';
 import {
   checkServerHealth,
   normalizeServerUrl,
   type HealthCheckResult,
 } from '../sync/health-check';
+import { useSyncContext } from '../sync/sync-context';
 import { useAppTheme } from '../theme';
-import { formatDateTime } from '../utils/format';
+import { formatDateTime, formatRelativeSyncTime } from '../utils/format';
 
 export function SettingsScreen() {
   const theme = useAppTheme();
@@ -33,6 +35,7 @@ export function SettingsScreen() {
     registerAccount,
     signOut,
   } = useAppContext();
+  const { snapshot: syncSnapshot, syncNow } = useSyncContext();
 
   const [urlInput, setUrlInput] = useState(serverUrl ?? '');
   const [testing, setTesting] = useState(false);
@@ -51,6 +54,18 @@ export function SettingsScreen() {
       setUrlInput(serverUrl);
     }
   }, [serverUrl]);
+
+  useEffect(() => {
+    if (
+      !isAuthenticated &&
+      session &&
+      !session.isLocalOnlyUser &&
+      session.username &&
+      username === ''
+    ) {
+      setUsername(session.username);
+    }
+  }, [isAuthenticated, session, username]);
 
   const handleTestConnection = async () => {
     setTesting(true);
@@ -136,9 +151,10 @@ export function SettingsScreen() {
         });
       }
       setPassword('');
+      void syncNow('manual');
       Alert.alert(
         'Angemeldet',
-        'Sitzung wurde sicher in expo-secure-store gespeichert.'
+        'Sitzung wurde sicher in expo-secure-store gespeichert und Synchronisierung gestartet.'
       );
     } catch (error) {
       setAuthError(
@@ -321,9 +337,25 @@ export function SettingsScreen() {
             </View>
           ) : (
             <View style={styles.authForm}>
-              <Text style={[styles.helper, { color: theme.textMuted }]}>
-                Aktuell arbeitest du im reinen Offline-Modus. Lokal erfasste Bücher werden beim ersten Login automatisch in dein Konto übernommen.
-              </Text>
+              {session && !session.isLocalOnlyUser ? (
+                <View
+                  style={[
+                    styles.diagBox,
+                    { backgroundColor: theme.warningSoft },
+                  ]}
+                >
+                  <Text style={[styles.diagTitle, { color: theme.warning }]}>
+                    Anmeldung abgelaufen
+                  </Text>
+                  <Text style={[styles.diagText, { color: theme.text }]}>
+                    Bitte melde dich erneut für {session.username ?? 'dein Konto'} an. Alle lokal gespeicherten Bücher und ungesyncten Änderungen bleiben vollständig erhalten.
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[styles.helper, { color: theme.textMuted }]}>
+                  Aktuell arbeitest du im reinen Offline-Modus. Lokal erfasste Bücher werden beim ersten Login automatisch in dein Konto übernommen.
+                </Text>
+              )}
 
               <View style={styles.modeSwitch}>
                 <Pressable
@@ -461,16 +493,19 @@ export function SettingsScreen() {
           )}
         </View>
 
-        {/* Lokaler Status */}
+        {/* Synchronisation & Gerätestatus */}
         <View
           style={[
             styles.card,
             { backgroundColor: theme.card, borderColor: theme.border },
           ]}
         >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>
-            Lokaler Gerätestatus
-          </Text>
+          <View style={styles.cardHeaderRow}>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>
+              Synchronisation & Gerätestatus
+            </Text>
+            <SyncStatusBadge compact />
+          </View>
           <InfoLine
             label="Modus"
             value={isAuthenticated ? 'Serverkonto verknüpft' : 'Offline-Lokal'}
@@ -478,15 +513,67 @@ export function SettingsScreen() {
           />
           <InfoLine
             label="Ausstehende Änderungen"
-            value={String(pendingChangesCount)}
+            value={String(syncSnapshot.pendingCount)}
             theme={theme}
           />
           <InfoLine
             label="Letzter Sync"
-            value={formatDateTime(session?.lastSyncAt)}
+            value={
+              syncSnapshot.lastSyncAt
+                ? `${formatRelativeSyncTime(syncSnapshot.lastSyncAt)} (${formatDateTime(syncSnapshot.lastSyncAt)})`
+                : formatDateTime(session?.lastSyncAt)
+            }
             theme={theme}
           />
+          {syncSnapshot.lastSummary && (
+            <InfoLine
+              label="Letzter Durchlauf"
+              value={`↑ ${syncSnapshot.lastSummary.pushedBooks + syncSnapshot.lastSummary.pushedUserBooks} · ↓ ${syncSnapshot.lastSummary.pulledBooks + syncSnapshot.lastSummary.pulledUserBooks} · Cover ${syncSnapshot.lastSummary.coversUploaded}/${syncSnapshot.lastSummary.coversDownloaded}`}
+              theme={theme}
+            />
+          )}
           <InfoLine label="Geräte-ID" value={deviceId || '–'} theme={theme} />
+
+          {syncSnapshot.lastSyncError && (
+            <View
+              style={[
+                styles.diagBox,
+                { backgroundColor: theme.dangerSoft },
+              ]}
+            >
+              <Text style={[styles.diagText, { color: theme.danger }]}>
+                {syncSnapshot.lastSyncError}
+              </Text>
+            </View>
+          )}
+
+          {isAuthenticated && (
+            <Pressable
+              onPress={() => void syncNow('manual')}
+              disabled={syncSnapshot.isSyncing}
+              style={[
+                styles.primaryBtn,
+                {
+                  backgroundColor: theme.primary,
+                  opacity: syncSnapshot.isSyncing ? 0.7 : 1,
+                  paddingVertical: 12,
+                  flexDirection: 'row',
+                  gap: 8,
+                },
+              ]}
+            >
+              {syncSnapshot.isSyncing ? (
+                <ActivityIndicator size="small" color={theme.primaryText} />
+              ) : (
+                <Ionicons name="sync" size={17} color={theme.primaryText} />
+              )}
+              <Text style={[styles.primaryBtnText, { color: theme.primaryText }]}>
+                {syncSnapshot.isSyncing
+                  ? 'Synchronisiere…'
+                  : 'Jetzt synchronisieren'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -542,6 +629,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     gap: 10,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   cardTitle: {
     fontSize: 16,

@@ -36,8 +36,10 @@ export interface AppContextValue {
   isAuthenticated: boolean;
   pendingChangesCount: number;
   libraryVersion: number;
+  localWriteVersion: number;
   lastDeleted: DeletedUndoInfo | null;
   notifyDataChanged: (deletedUndo?: DeletedUndoInfo | null) => Promise<void>;
+  refreshFromSync: () => Promise<void>;
   dismissUndoBanner: () => void;
   undoLastDelete: () => Promise<void>;
   saveServerUrl: (rawUrl: string) => Promise<string>;
@@ -65,6 +67,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pendingChangesCount, setPendingChangesCount] = useState(0);
   const [libraryVersion, setLibraryVersion] = useState(0);
+  const [localWriteVersion, setLocalWriteVersion] = useState(0);
   const [lastDeleted, setLastDeleted] = useState<DeletedUndoInfo | null>(null);
 
   const refreshState = useCallback(async (executor: SqlExecutor) => {
@@ -111,9 +114,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await refreshState(db);
       }
       setLibraryVersion((v) => v + 1);
+      setLocalWriteVersion((v) => v + 1);
     },
     [db, refreshState]
   );
+
+  const refreshFromSync = useCallback(async () => {
+    if (db) {
+      await refreshState(db);
+    }
+    setLibraryVersion((v) => v + 1);
+  }, [db, refreshState]);
 
   const dismissUndoBanner = useCallback(() => {
     setLastDeleted(null);
@@ -125,6 +136,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLastDeleted(null);
     await refreshState(db);
     setLibraryVersion((v) => v + 1);
+    setLocalWriteVersion((v) => v + 1);
   }, [db, lastDeleted, refreshState, session]);
 
   const saveServerUrl = useCallback(
@@ -259,8 +271,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated,
         pendingChangesCount,
         libraryVersion,
+        localWriteVersion,
         lastDeleted,
         notifyDataChanged,
+        refreshFromSync,
         dismissUndoBanner,
         undoLastDelete,
         saveServerUrl,

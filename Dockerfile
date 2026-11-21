@@ -28,6 +28,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY shared/package.json shared/package.json
 COPY server/package.json server/package.json
 COPY web/package.json web/package.json
+COPY mobile/package.json mobile/package.json
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter "@bibliolisa/shared..." --filter "@bibliolisa/server..." --filter "@bibliolisa/web..."
 
@@ -50,8 +51,10 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY shared/package.json shared/package.json
 COPY server/package.json server/package.json
 COPY web/package.json web/package.json
+COPY mobile/package.json mobile/package.json
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm install --frozen-lockfile --prod --filter "@bibliolisa/server..."
+    pnpm install --frozen-lockfile --prod --filter "@bibliolisa/server..." \
+    && rm -rf mobile
 
 # ---------------------------------------------------------------------------
 # Stage 3: runtime – Non-Root (UID/GID 10001), nur Prod-Dependencies + Build-Artefakte

@@ -166,6 +166,7 @@ Bibliolisa/
     ├── package.json
     ├── tsconfig.json
     ├── app.json                        # Expo-Konfiguration + Config-Plugin-Registrierung
+    ├── eas.json                        # EAS-Build-Profile (development, preview, production als APK)
     ├── metro.config.js                 # pnpm-Monorepo: watchFolders & nodeModulesPaths für @bibliolisa/shared
     ├── plugins/
     │   └── withLanNetworkSecurity.js   # Expo Config Plugin für network_security_config.xml
@@ -178,7 +179,7 @@ Bibliolisa/
         ├── services/
         │   ├── secure-storage.ts       # expo-secure-store Wrapper für Tokens & Auth-Metadaten
         │   ├── api-client.ts           # Dynamische Server-URL, Bearer-Injection, Auto-Refresh
-        │   └── cover-cache.ts          # Lokaler Cover-Cache unter documentDirectory/covers/
+        │   └── cover-cache.ts          # Lokaler Cover-Cache unter Paths.document/covers/
         ├── sync/
         │   ├── health-check.ts         # 1500ms AbortController-Check gegen /api/health
         │   ├── sync-engine.ts          # Single-Flight Mutex, Push/Pull-Loop, Cover-Sync
@@ -529,7 +530,7 @@ CREATE TABLE sync_state (
 | :--- | :--- | :--- |
 | **Access Token Speicher** | Ausschließlich im JavaScript-Arbeitsspeicher (kein `localStorage`/`sessionStorage`) | `expo-secure-store` (Android Keystore) |
 | **Refresh Token Speicher** | `HttpOnly; SameSite=Lax` Cookie `bibliolisa_refresh` (`Path=/api/auth`) | `expo-secure-store` (`accessToken`, `refreshToken`, `accessTokenExpiresAt`) |
-| **Cover-Auslieferung (`GET /api/covers/:key`)** | Kurzlebiges `HttpOnly; SameSite=Lax` Cookie `bibliolisa_media` (`Path=/api/covers`, JWT `scope: 'media:read'`, 20m TTL), damit native `<img>`-Tags ohne Token in der URL strikt authentifiziert laden | Download über `expo-file-system` `downloadAsync` mit Header `Authorization: Bearer <accessToken>` |
+| **Cover-Auslieferung (`GET /api/covers/:key`)** | Kurzlebiges `HttpOnly; SameSite=Lax` Cookie `bibliolisa_media` (`Path=/api/covers`, JWT `scope: 'media:read'`, 20m TTL), damit native `<img>`-Tags ohne Token in der URL strikt authentifiziert laden | Atomarer Download über `expo-file-system` (`File.downloadFileAsync` nach `Paths.document/covers/`) mit Header `Authorization: Bearer <accessToken>` |
 | **`Secure`-Cookie-Flag** | Dynamisch `true`, sobald `request.protocol === 'https'` (erkannt dank `trustProxy: true` über `X-Forwarded-Proto`) | Entfällt (keine Cookies, ausschließlich `Authorization: Bearer`) |
 | **Stille Verlängerung** | `apiClient` ruft bei `401` automatisch `POST /api/auth/refresh` mit Cookie auf und wiederholt den Request | Prüft vor jedem API-/Sync-Aufruf lokal `accessTokenExpiresAt` (60s Puffer) und rotiert transparent via `POST /api/auth/refresh` ohne erneuten Login |
 
@@ -763,9 +764,9 @@ Bibliolisa löst dies sauber durch zwei getrennte UTC-Zeitstempel:
 
 ### 5.6 Cover-Synchronisation & Cache-Bereinigung (Mobile)
 
-1. **Download:** Nach abgeschlossenem DB-Delta-Pull prüft `cover-cache.ts` alle aktiven Bücher mit `cover_key != null`, ob `${documentDirectory}covers/${cover_key}` lokal existiert. Fehlende Cover werden mit maximal **3 parallelen Requests** über `GET /api/covers/:coverKey` (mit `Authorization: Bearer`) geladen und in `cover_local_uri` vermerkt.
+1. **Download:** Nach abgeschlossenem DB-Delta-Pull prüft `cover-cache.ts` (Expo SDK 54 `Paths.document/covers/`) alle aktiven Bücher mit `cover_key != null`, ob die Zieldatei lokal existiert (`getCachedCoverUri`). Fehlende Cover werden mit maximal **3 parallelen Requests** atomar via `File.downloadFileAsync` über `GET /api/covers/:coverKey` (mit `Authorization: Bearer`) geladen und in `cover_local_uri` vermerkt.
 2. **Upload:** Wurde im Offline-Modus ein eigenes Cover (Kamera/Galerie) ausgewählt (`cover_pending_upload = 1`), lädt die Sync-Engine das Bild nach erfolgreichem Push des Buches über `POST /api/books/:bookId/cover` hoch, übernimmt den vom Server generierten `coverKey` und setzt `cover_pending_upload = 0`.
-3. **Orphan-Cleanup:** Nicht mehr referenzierte Cover-Dateien im lokalen Verzeichnis werden regelmäßig entfernt.
+3. **Orphan-Cleanup:** Nicht mehr referenzierte Cover-Dateien im lokalen Verzeichnis werden regelmäßig entfernt (`cleanupOrphanCovers`).
 
 ### 5.7 Sichtbare Sync-Status-Zustände in der Android-App
 
@@ -1016,14 +1017,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: bibliolisa:local
     container_name: bibliolisa
     restart: unless-stopped
+    init: true
     ports:
-      - "${HOST_PORT:-3000}:3000" # z.B. 127.0.0.1:3000:3000 bei Host-Proxy oder 3000:3000 im LAN
+      - "${HOST_BIND:-0.0.0.0}:${HOST_PORT:-3000}:3000" # z.B. HOST_BIND=127.0.0.1 bei Host-Proxy oder 0.0.0.0 im LAN
     environment:
       PORT: "3000"
       DATA_DIR: "/data"
-      TRUST_PROXY: "true"
+      TRUST_PROXY: "${TRUST_PROXY:-true}"
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
       ALLOW_REGISTRATION: "${ALLOW_REGISTRATION:-true}"
       HARDCOVER_API_KEY: "${HARDCOVER_API_KEY:-}"
@@ -1031,6 +1034,8 @@ services:
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
       - ./data:/data
+    security_opt:
+      - no-new-privileges:true
 ```
 
 ### 9.4 Anbindung an bestehenden Host-Reverse-Proxy

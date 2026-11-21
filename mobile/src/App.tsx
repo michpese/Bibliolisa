@@ -17,6 +17,7 @@ import { BookDetailScreen } from './screens/BookDetailScreen';
 import { LibraryScreen } from './screens/LibraryScreen';
 import { RecommendationsScreen } from './screens/RecommendationsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { SyncProvider } from './sync/sync-context';
 import { useAppTheme } from './theme';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -155,7 +156,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppProvider>
-        <AppShell />
+        <SyncProvider>
+          <AppShell />
+        </SyncProvider>
       </AppProvider>
     </SafeAreaProvider>
   );
