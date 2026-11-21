@@ -34,6 +34,7 @@ export const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   HOST: z.string().trim().min(1).default('0.0.0.0'),
   DATA_DIR: z.string().trim().min(1).default('/data'),
+  WEB_DIR: optionalNonEmptyString(),
   JWT_SECRET: z
     .string()
     .min(32, 'JWT_SECRET muss mindestens 32 Zeichen lang sein.'),

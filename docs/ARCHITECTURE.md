@@ -984,11 +984,11 @@ Die komplette Empfehlungslogik liegt als reine, seiteneffektfreie TypeScript-Fun
   1. Aktiviert `corepack enable` (`pnpm`).
   2. Kopiert Lockfile + `package.json`-Dateien, führt `pnpm install --frozen-lockfile` aus.
   3. Baut `@bibliolisa/shared` -> `@bibliolisa/web` (Vite-Bundle nach `/app/web/dist`) -> `@bibliolisa/server` (`tsc` nach `/app/server/dist`).
-  4. Erzeugt ein produktionsbereinigtes Server-Deployment via `pnpm --filter @bibliolisa/server deploy --prod /app/deploy`.
+  4. Installiert in einer separaten Stage ausschließlich Produktionsabhängigkeiten (`pnpm install --frozen-lockfile --prod --filter "@bibliolisa/server..."`) – statt `pnpm deploy`, siehe `docs/ROADMAP.md` (Phase 3, Abweichungen).
 - **Stage 2 (`runtime`):**
-  1. Erstellt Non-Root-Benutzer `bibliolisa` (UID/GID konfigurierbar bzw. `10001`).
-  2. Kopiert `/app/deploy` (inkl. Drizzle-Migrationen), `/app/server/dist` und das Webapp-Bundle `/app/web/dist` nach `/app/public`.
-  3. Legt das Volume-Verzeichnis `/data` und `/data/covers` mit passenden Rechten für `bibliolisa` an.
+  1. Erstellt Non-Root-Benutzer `bibliolisa` (UID/GID `10001`).
+  2. Kopiert die Prod-`node_modules`/`package.json`-Struktur, `shared/dist`, `server/dist` (inkl. Drizzle-Migrationen) und das Webapp-Bundle `web/dist` nach `/app/public` (`WEB_DIR`).
+  3. Legt `/data` und `/data/covers` mit Besitzer `10001:10001` an; `docker/entrypoint.sh` prüft beim Start die Schreibbarkeit (klare Fehlermeldung statt `SQLITE_CANTOPEN`) und korrigiert bei explizitem Root-Start (`user: "0:0"`) die Rechte, bevor per `setpriv` auf UID 10001 gewechselt wird.
   4. Konfiguriert `EXPOSE 3000` (Standardwert von `PORT`) und einen Container-`HEALTHCHECK` gegen `http://127.0.0.1:${PORT:-3000}/api/health`.
 - **Fastify-Routing im Container:**
   - `/api/*`: Ausschließlich REST-API-Routen; unbekannte Pfade unter `/api/*` geben JSON `404` zurück (niemals `index.html`).
