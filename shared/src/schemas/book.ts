@@ -98,3 +98,16 @@ export const BookUpdateSchema = z.object({
   metadataExternalId: z.string().trim().max(200).nullable().optional(),
 });
 export type BookUpdate = z.infer<typeof BookUpdateSchema>;
+
+export const FetchBookCoverRequestSchema = z.object({
+  url: z.string().trim().url('Ungültige Cover-URL.').max(2000),
+});
+export type FetchBookCoverRequest = z.infer<typeof FetchBookCoverRequestSchema>;
+
+export const BookCoverResponseSchema = z.object({
+  bookId: UUIDv4Schema,
+  coverKey: CoverKeySchema,
+  coverSourceUrl: z.string().url().max(2000).nullable(),
+  updatedAt: IsoUtcTimestampSchema,
+});
+export type BookCoverResponse = z.infer<typeof BookCoverResponseSchema>;

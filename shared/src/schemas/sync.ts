@@ -14,10 +14,12 @@ export const SyncRequestSchema = z.object({
   cursor: z.string().nullable().default(null),
   clientTime: IsoUtcTimestampSchema,
   limit: z.number().int().min(1).max(500).default(100),
-  changes: z.object({
-    books: z.array(SyncBookPayloadSchema).default([]),
-    userBooks: z.array(SyncUserBookPushSchema).default([]),
-  }),
+  changes: z
+    .object({
+      books: z.array(SyncBookPayloadSchema).default([]),
+      userBooks: z.array(SyncUserBookPushSchema).default([]),
+    })
+    .default({ books: [], userBooks: [] }),
 });
 export type SyncRequest = z.infer<typeof SyncRequestSchema>;
 

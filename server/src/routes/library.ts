@@ -6,6 +6,7 @@ import {
 } from '@bibliolisa/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { CoverService } from '../services/cover.service.js';
 import type { LibraryService } from '../services/library.service.js';
 
 const UserBookParamsSchema = z.object({
@@ -14,7 +15,8 @@ const UserBookParamsSchema = z.object({
 
 export function registerLibraryRoutes(
   app: FastifyInstance,
-  libraryService: LibraryService
+  libraryService: LibraryService,
+  coverService?: CoverService
 ): void {
   app.get('/api/library', async (request, reply) => {
     const query = LibraryQuerySchema.parse(request.query ?? {});
@@ -36,6 +38,28 @@ export function registerLibraryRoutes(
   app.post('/api/library', async (request, reply) => {
     const body = CreateLibraryEntrySchema.parse(request.body ?? {});
     const created = libraryService.create(request.user.id, body);
+
+    if (
+      coverService &&
+      created.book.coverSourceUrl &&
+      !created.book.coverKey
+    ) {
+      try {
+        await coverService.fetchAndStoreForBook(
+          request.user.id,
+          created.bookId,
+          created.book.coverSourceUrl
+        );
+        const refreshed = libraryService.getById(request.user.id, created.id);
+        return reply.status(201).send(refreshed);
+      } catch (error) {
+        request.log.warn(
+          { err: error, bookId: created.bookId },
+          'Best-Effort Cover-Download bei Buchanlage fehlgeschlagen'
+        );
+      }
+    }
+
     return reply.status(201).send(created);
   });
 

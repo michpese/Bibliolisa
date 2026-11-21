@@ -11,7 +11,7 @@
 | Phase | Titel | Status | Kernziel | Verifikations-Gate |
 | :--- | :--- | :--- | :--- | :--- |
 | **Phase 1** | Monorepo-Fundament, Shared Contracts & Backend Core | `Abgeschlossen` | pnpm-Workspace, `/shared`, SQLite (WAL) + Drizzle, `scrypt`/JWT Auth, Bibliothek-CRUD | `pnpm test` + `pnpm build` (`shared`, `server`) |
-| **Phase 2** | Metadaten-Provider, Cover-Cache, Delta-Sync, Empfehlungen & Export | `Offen` | 3 Provider + Aggregator, SSRF-sicherer Cover-Cache, `POST /api/sync`, Empfehlungen, JSON/CSV | Mock-Provider-, SSRF-, Sync-Konflikt- & Export-Tests |
+| **Phase 2** | Metadaten-Provider, Cover-Cache, Delta-Sync, Empfehlungen & Export | `Abgeschlossen` | 3 Provider + Aggregator, SSRF-sicherer Cover-Cache, `POST /api/sync`, Empfehlungen, JSON/CSV | Mock-Provider-, SSRF-, Sync-Konflikt- & Export-Tests |
 | **Phase 3** | Webapp (`/web`) & Docker Single-Container-Deployment | `Offen` | Vollständige React-Webapp (Verwaltung, Empfehlungen, Backup), Multi-Stage `Dockerfile` | `web` Build + Docker-Image-Build + Container-Smoke-Test |
 | **Phase 4** | Offline-First Android-App (`/mobile`) | `Offen` | `expo-sqlite`, Offline-CRUD, Kamera-ISBN-Scanner, Offline-Empfehlungen, Settings & Test-Button | Typecheck + Expo/Metro-Bundle + Flugmodus-Funktionstest |
 | **Phase 5** | Android Delta-Sync-Engine, E2E-Verifikation & Release-Härtung | `Offen` | `/api/health`-Pre-Check, Auto-/WLAN-Sync, Cover-Cache-Sync, Status-UI, E2E-Abnahme | Gesamttestsuite + E2E-Konflikt-/Multi-User-/Proxy-Check |
@@ -67,29 +67,29 @@
 
 ### Aufgaben-Checkliste
 
-- [ ] **Modulare Metadaten-Provider-Architektur:**
+- [x] **Modulare Metadaten-Provider-Architektur:**
   - `MetadataProvider`-Interface und `OpenLibraryAdapter` (key-frei), `GoogleBooksAdapter` (key-frei, optionaler API-Key) sowie `HardcoverAdapter` (GraphQL, optional über `HARDCOVER_API_KEY`).
   - `MetadataAggregator`: Parallele Ausführung (`Promise.allSettled`, `4000 ms` Timeout pro Adapter), `15 min` In-Memory-TTL-Cache, feldspezifisches Merge-Ranking (Buchreihen/Bände bevorzugt aus Hardcover/Open Library), Rausch-Tag-Filterung.
   - Endpunkte `GET /api/metadata/isbn/:isbn`, `GET /api/metadata/search` und `GET /api/metadata/providers`.
-- [ ] **Cover-Cache & Bildverarbeitung (`CoverService`):**
+- [x] **Cover-Cache & Bildverarbeitung (`CoverService`):**
   - SSRF-Schutz (nur `http`/`https`, IP-Blocklist gegen Loopback/Private/Link-Local nach DNS-Auflösung, max. 3 Redirects, `10 MB` Limit, `8 s` Timeout).
   - `sharp`-Konvertierung nach WebP (`max 600x900`, Qualität `82`), SHA-256 Content-Addressed Ablage unter `${DATA_DIR}/covers/<sha256_24>.webp` per atomarem Write.
   - Routen `GET /api/covers/:coverKey` (akzeptiert Bearer-Header **oder** `bibliolisa_media`-Cookie; Path-Traversal-Schutz), `POST /api/books/:bookId/cover` (Multipart, max `5 MB`) und `POST /api/books/:bookId/cover/fetch`.
-- [ ] **Delta-Sync-Backend (`POST /api/sync`):**
+- [x] **Delta-Sync-Backend (`POST /api/sync`):**
   - Atomare SQLite-Transaktion für kombinierten Push & Pull.
   - Konfliktauflösung über `updated_at` (LWW) inkl. Clock-Skew-Kappung (`> serverNow + 5 min`) und `clockSkewWarning`.
   - Serverseitig streng monotoner `server_updated_at`-Timestamp und Base64-Compound-Cursor (`server_updated_at|id`) mit Pagination (`limit`, `hasMore`, `nextCursor`).
   - Behandlung doppelter aktiver `(user_id, book_id)`-Einträge (LWW-Merge auf bestehende Server-Zeile) sowie Soft-Delete-/Restore-Konflikte.
-- [ ] **Empfehlungs-Endpunkt & Backup/Export:**
+- [x] **Empfehlungs-Endpunkt & Backup/Export:**
   - `GET /api/recommendations` an `@bibliolisa/shared` anbinden (`continue_series`, `affinity`, `quick_read`, `dust_collector`, `surprise_me`).
   - `GET /api/export/json`, `GET /api/export/csv` (UTF-8 BOM + CSV-Formula-Injection-Maskierung für `=`, `+`, `-`, `@`) und `POST /api/import/json` (Zod-Validierung + idempotenter Import).
 
 ### Verifikations-Check (Phase 2)
 
-- [ ] Unit- & Integrationstests für alle 3 Provider-Adapter (gemockte HTTP-Antworten inkl. Teilausfall/Timeout) sowie Merge-Prioritäten bestehen.
-- [ ] SSRF-Testsuite blockiert `127.0.0.1`, `169.254.169.254`, `10.0.0.1` und ungültige Cover-Pfade (`../`).
-- [ ] Sync-Testmatrix deckt Initial-Pull, Pagination (`hasMore`), LWW-Client-Wins, LWW-Server-Wins, verzögerten Offline-Push bei zwischenzeitlichem Cursor, Soft-Delete-Konflikt und Multi-User-Isolation ab.
-- [ ] JSON-Export -> Löschung/neuer Benutzer -> JSON-Import Roundtrip sowie CSV-Formula-Injection-Test bestehen.
+- [x] Unit- & Integrationstests für alle 3 Provider-Adapter (gemockte HTTP-Antworten inkl. Teilausfall/Timeout) sowie Merge-Prioritäten bestehen.
+- [x] SSRF-Testsuite blockiert `127.0.0.1`, `169.254.169.254`, `10.0.0.1` und ungültige Cover-Pfade (`../`).
+- [x] Sync-Testmatrix deckt Initial-Pull, Pagination (`hasMore`), LWW-Client-Wins, LWW-Server-Wins, verzögerten Offline-Push bei zwischenzeitlichem Cursor, Soft-Delete-Konflikt und Multi-User-Isolation ab.
+- [x] JSON-Export -> Löschung/neuer Benutzer -> JSON-Import Roundtrip sowie CSV-Formula-Injection-Test bestehen.
 
 ### Akzeptanzkriterien (Phase 2)
 
@@ -100,7 +100,9 @@
 5. `GET /api/recommendations` empfiehlt bei begonnener Buchreihe (z. B. Band `1` gelesen) den nächsten ungelesenen Band (z. B. Band `1.5`) an höchster Position mit verständlicher Begründung.
 
 ### Abweichungen / Notizen
-- *Noch keine (Phase noch nicht gestartet).*
+- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
+- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
+- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
 
 ---
 
@@ -135,7 +137,9 @@
 3. Nach einem `docker compose down && docker compose up -d` bleiben alle Benutzer, Bücher, Bewertungen und gecachten Cover in `/data` erhalten.
 
 ### Abweichungen / Notizen
-- *Noch keine (Phase noch nicht gestartet).*
+- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
+- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
+- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
 
 ---
 
@@ -172,7 +176,9 @@
 4. `@bibliolisa/shared` wird direkt genutzt (keine kopierten DTOs, Validatoren oder Empfehlungsfunktionen in `/mobile`).
 
 ### Abweichungen / Notizen
-- *Noch keine (Phase noch nicht gestartet).*
+- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
+- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
+- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
 
 ---
 
@@ -207,4 +213,6 @@
 5. **Dokumentations-Parität:** `docs/ROADMAP.md` und `docs/ARCHITECTURE.md` spiegeln den final getesteten Stand ohne offene Widersprüche wider.
 
 ### Abweichungen / Notizen
-- *Noch keine (Phase noch nicht gestartet).*
+- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
+- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
+- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
