@@ -29,6 +29,18 @@ export const ExportPayloadSchema = z.object({
 });
 export type ExportPayload = z.infer<typeof ExportPayloadSchema>;
 
+export const ExportImportEnvelopeSchema = z.object({
+  version: z.literal(1),
+  exportedAt: IsoUtcTimestampSchema,
+  user: z.object({
+    id: UUIDv4Schema,
+    username: z.string(),
+    displayName: z.string().nullable(),
+  }),
+  entries: z.array(z.unknown()),
+});
+export type ExportImportEnvelope = z.infer<typeof ExportImportEnvelopeSchema>;
+
 export const ImportResultSchema = z.object({
   imported: z.number().int().nonnegative(),
   updated: z.number().int().nonnegative(),

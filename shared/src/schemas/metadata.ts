@@ -54,6 +54,12 @@ export const MetadataSearchResponseSchema = z.object({
 });
 export type MetadataSearchResponse = z.infer<typeof MetadataSearchResponseSchema>;
 
+export const MetadataSearchQuerySchema = z.object({
+  q: z.string().trim().min(1, 'Suchbegriff ist erforderlich.').max(200),
+  limit: z.coerce.number().int().min(1).max(25).default(10),
+});
+export type MetadataSearchQuery = z.infer<typeof MetadataSearchQuerySchema>;
+
 export const MetadataProvidersResponseSchema = z.object({
   providers: z.array(
     z.object({

@@ -1,0 +1,14 @@
+import { SyncRequestSchema } from '@bibliolisa/shared';
+import type { FastifyInstance } from 'fastify';
+import type { SyncService } from '../services/sync.service.js';
+
+export function registerSyncRoutes(
+  app: FastifyInstance,
+  syncService: SyncService
+): void {
+  app.post('/api/sync', async (request, reply) => {
+    const body = SyncRequestSchema.parse(request.body ?? {});
+    const result = syncService.sync(request.user.id, body);
+    return reply.status(200).send(result);
+  });
+}

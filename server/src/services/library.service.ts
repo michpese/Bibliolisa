@@ -816,4 +816,18 @@ export class LibraryService {
 
     return this.getById(userId, userBookId);
   }
+
+  listAllActiveForUser(userId: string): LibraryEntry[] {
+    const rows = this.dbCtx.sqlite
+      .prepare(
+        `SELECT ${JOINED_SELECT}
+         FROM user_books ub
+         INNER JOIN books b ON b.id = ub.book_id
+         WHERE ub.user_id = ? AND ub.deleted_at IS NULL AND b.deleted_at IS NULL
+         ORDER BY ub.added_at ASC, ub.id ASC`
+      )
+      .all(userId) as JoinedLibraryRow[];
+
+    return rows.map(mapJoinedRow);
+  }
 }
