@@ -12,7 +12,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **Phase 1** | Monorepo-Fundament, Shared Contracts & Backend Core | `Abgeschlossen` | pnpm-Workspace, `/shared`, SQLite (WAL) + Drizzle, `scrypt`/JWT Auth, Bibliothek-CRUD | `pnpm test` + `pnpm build` (`shared`, `server`) |
 | **Phase 2** | Metadaten-Provider, Cover-Cache, Delta-Sync, Empfehlungen & Export | `Abgeschlossen` | 3 Provider + Aggregator, SSRF-sicherer Cover-Cache, `POST /api/sync`, Empfehlungen, JSON/CSV | Mock-Provider-, SSRF-, Sync-Konflikt- & Export-Tests |
-| **Phase 3** | Webapp (`/web`) & Docker Single-Container-Deployment | `Offen` | Vollständige React-Webapp (Verwaltung, Empfehlungen, Backup), Multi-Stage `Dockerfile` | `web` Build + Docker-Image-Build + Container-Smoke-Test |
+| **Phase 3** | Webapp (`/web`) & Docker Single-Container-Deployment | `Abgeschlossen` | Vollständige React-Webapp (Verwaltung, Empfehlungen, Backup), Multi-Stage `Dockerfile` | `web` Build + Docker-Image-Build + Container-Smoke-Test |
 | **Phase 4** | Offline-First Android-App (`/mobile`) | `Offen` | `expo-sqlite`, Offline-CRUD, Kamera-ISBN-Scanner, Offline-Empfehlungen, Settings & Test-Button | Typecheck + Expo/Metro-Bundle + Flugmodus-Funktionstest |
 | **Phase 5** | Android Delta-Sync-Engine, E2E-Verifikation & Release-Härtung | `Offen` | `/api/health`-Pre-Check, Auto-/WLAN-Sync, Cover-Cache-Sync, Status-UI, E2E-Abnahme | Gesamttestsuite + E2E-Konflikt-/Multi-User-/Proxy-Check |
 
@@ -110,25 +110,25 @@
 
 ### Aufgaben-Checkliste
 
-- [ ] **Webapp-Grundgerüst (`/web`):**
+- [x] **Webapp-Grundgerüst (`/web`):**
   - Vite + React + TypeScript + Tailwind CSS + shadcn/ui einrichten (Dev-Proxy `/api` -> Server).
   - Auth-Layer mit In-Memory Access Token, Silent Refresh über `HttpOnly`-Cookie, Login-/Registrierungsseite und Session-/Geräteverwaltung in den Einstellungen.
-- [ ] **Bibliotheksverwaltung (Feature-Parität):**
+- [x] **Bibliotheksverwaltung (Feature-Parität):**
   - Übersicht als Grid- und Listenansicht mit Live-Suche (`q`), Filtern (Lesestatus, Genre/Tag, Autor, Buchreihe, Mindestbewertung) und allen Sortiermodi (Reihe inkl. Dezimalband, Autor, Titel, Status, Hinzufügedatum, Bewertung).
   - Buch hinzufügen & bearbeiten: ISBN-/Titelsuche mit Provider-Auswahl (inkl. Cover-Vorschau), nahtloser Übergang in manuelle Eingabe/Korrektur, Cover-Upload, Dezimal-Bandnummer, Sterne-Bewertung `1–5`, Notizen, Statuswechsel und Soft Delete inkl. Wiederherstellen-Toast.
-- [ ] **Empfehlungen & Backup/Export in der Webapp:**
+- [x] **Empfehlungen & Backup/Export in der Webapp:**
   - Ansicht „Was lese ich als Nächstes?“ mit Kategorien (Begonnene Reihen, Empfohlen für dich, Schneller Read `<300` Seiten, Staubfänger, Überrasch mich mit Würfel-Button) inklusive Anzeige der jeweiligen Begründung.
   - Backup-Seite mit Ein-Klick-Download für JSON & CSV sowie Upload-Dialog für JSON-Reimport inkl. Import-Zusammenfassung.
-- [ ] **Single-Container-Docker & Reverse-Proxy-Kompatibilität:**
+- [x] **Single-Container-Docker & Reverse-Proxy-Kompatibilität:**
   - Fastify Static-Serving (`@fastify/static`) für `web/dist` auf `/` mit SPA-Fallback (während unbekannte `/api/*`-Pfade strikt JSON `404` liefern).
   - Multi-Stage `Dockerfile` (`node:22-bookworm-slim`, Non-Root-User `bibliolisa`, `HEALTHCHECK`), `.dockerignore` und `docker-compose.yml` (konfigurierbarer Port, Volume `./data:/data`, kein eingebauter Reverse Proxy).
 
 ### Verifikations-Check (Phase 3)
 
-- [ ] `pnpm --filter @bibliolisa/web typecheck` und `pnpm --filter @bibliolisa/web build` laufen fehlerfrei durch.
-- [ ] `docker build -t bibliolisa:local .` erstellt das Image erfolgreich ohne Dev-Abhängigkeiten in der Runtime-Stage.
-- [ ] Container-Smoke-Test mit gemountetem Host-Verzeichnis unter `/data` startet, liefert `/` (HTML) und `/api/health` (`200 OK`), und übersteht Container-Neustart ohne Daten- oder Cover-Verlust.
-- [ ] Simulation von Reverse-Proxy-Headern (`X-Forwarded-Proto: https`, `X-Forwarded-For`) setzt das `Secure`-Flag auf Auth-Cookies korrekt und liefert authentifizierte Cover in der Web-UI.
+- [x] `pnpm --filter @bibliolisa/web typecheck` und `pnpm --filter @bibliolisa/web build` laufen fehlerfrei durch.
+- [x] `docker build -t bibliolisa:local .` erstellt das Image erfolgreich ohne Dev-Abhängigkeiten in der Runtime-Stage.
+- [x] Container-Smoke-Test mit gemountetem Host-Verzeichnis unter `/data` startet, liefert `/` (HTML) und `/api/health` (`200 OK`), und übersteht Container-Neustart ohne Daten- oder Cover-Verlust.
+- [x] Simulation von Reverse-Proxy-Headern (`X-Forwarded-Proto: https`, `X-Forwarded-For`) setzt das `Secure`-Flag auf Auth-Cookies korrekt und liefert authentifizierte Cover in der Web-UI.
 
 ### Akzeptanzkriterien (Phase 3)
 
@@ -136,10 +136,29 @@
 2. Alle Buchfelder, Reihen-Sortierungen, Filter, Empfehlungen und JSON/CSV-Exporte sind vollständig über die Web-Oberfläche nutzbar.
 3. Nach einem `docker compose down && docker compose up -d` bleiben alle Benutzer, Bücher, Bewertungen und gecachten Cover in `/data` erhalten.
 
+### Implementierungsstand & Verifikation (2026-11-21)
+
+Vorhanden:
+- `web/`: Vite + React 19 + TypeScript + Tailwind (Dark/Light/System-Theme), shadcn-artige Komponenten (Radix), TanStack Query, React Router; Seiten Login/Registrierung, Bibliothek (Reihen-/Raster-/Listenansicht, Reihen-Fortschrittsbalken, Ein-Klick-Statuswechsel mit optimistischem Update, Live-Suche, Filter, alle Sortiermodi), Buchdetail, Hinzufügen/Bearbeiten inkl. Metadaten-Suche mit Provider-Auswahl & Cover-Vorschau/-Upload, Empfehlungen, Backup (JSON/CSV/Import), Einstellungen (Theme, Sessions, Passwort).
+- `server/`: `@fastify/static`-Auslieferung (`plugins/static.ts`), SPA-Fallback im Not-Found-Handler (`/api/*` bleibt JSON-404), neue Env-Variable `WEB_DIR`, Test `tests/static.test.ts` (SPA-Fallback, Asset-Caching, Secure-Cookie nur bei `X-Forwarded-Proto: https`).
+- `Dockerfile` (Multi-Stage, Non-Root UID/GID 10001, `HEALTHCHECK`), `docker/entrypoint.sh` (Schreibtest für `/data`, optionaler Root-Start mit Rechte-Korrektur + `setpriv`), `.dockerignore`, `.gitattributes` (LF für Shell-Skripte), `docker-compose.yml`, aktualisierte `.env.example`.
+- `scripts/docker-smoke-test.mjs` (`pnpm docker:smoke`): baut/startet das Image mit gemountetem Host-Verzeichnis und prüft Non-Root/Rechte, `/`, SPA-Fallback, `/api/health`, Reverse-Proxy-Header (`Secure`-Flag), Cover-Upload/-Auslieferung, JSON-404, Neustart-Persistenz.
+
+Verifikation (ausgeführt, alle grün):
+- `pnpm --filter @bibliolisa/shared build` / `test` (12 Tests), `pnpm --filter @bibliolisa/web typecheck` und `build` (Vite, 1744 Module), `pnpm --filter @bibliolisa/server typecheck` / `build` / `test` (8 Testdateien, 25 Tests inkl. neuem `static.test.ts`).
+- `docker build -t bibliolisa:local .` erfolgreich (Image 438 MB; Runtime enthält keine Dev-Tools wie `tsc`/`vitest`; `id` = `uid=10001(bibliolisa)`).
+- `pnpm docker:smoke` (`scripts/docker-smoke-test.mjs`): **29/29 Prüfungen bestanden** – Non-Root/Rechte auf gemountetem `/data`, `/` + SPA-Fallback + immutable Assets, `/api/health`, JSON-404, Reverse-Proxy-Header (`Secure`-Flag nur bei `X-Forwarded-Proto: https`), Cover-Upload/-Auslieferung per Media-Cookie (ohne Auth 401), Neustart-Persistenz von Benutzer, Buch und Cover.
+- Nicht automatisiert geprüft: visuelle Darstellung der Webapp im Browser (Dark/Light, Reihenansicht) – bitte einmal manuell ansehen.
 ### Abweichungen / Notizen
-- `POST /api/sync` (`SyncService`) filtert `pull.books` auf SQL-Ebene strikt über `EXISTS (SELECT 1 FROM user_books WHERE user_id = ? AND book_id = b.id)`, sodass ausschließlich Bücher ausgeliefert werden, die von mindestens einem `user_books`-Eintrag des authentifizierten Benutzers referenziert werden (kein Leak fremder Katalog-Einträge). Zudem lädt der Pull beim erstmaligen Referenzieren eines bereits existierenden globalen `books`-Datensatzes über `user_books` auch dessen zugehöriges `Book`-Objekt mit, selbst wenn `books.server_updated_at` älter als der Sync-Cursor ist.
-- In `@bibliolisa/server` wurden `sharp` (`^0.35.5`) für WebP-Konvertierung sowie `@fastify/multipart` (`^9.4.0`, kompatibel mit Fastify 5) ergänzt; `@bibliolisa/shared` wurde um die Request-/Response-Schemas `MetadataSearchQuerySchema`, `FetchBookCoverRequestSchema`, `BookCoverResponseSchema` und `ExportImportEnvelopeSchema` erweitert.
-- Verifikation nach Abschluss (Phase 2): `@bibliolisa/shared` (3 Testdateien, 12 Tests) sowie `@bibliolisa/server` (7 Testdateien, 23 Tests — inkl. Provider-Mock-, SSRF-, Cover-, Sync-Konflikt-, Export/Import- und Empfehlungstests) inkl. Typechecks (`pnpm -r typecheck`) und Builds (`pnpm -r build`) vollständig grün.
+- **Tailwind v3.4** statt v4 und handgeschriebene shadcn-artige Komponenten (`web/src/components/ui/*`, Radix Dialog/Slot, `class-variance-authority`) statt `shadcn`-CLI, damit der Build ohne interaktive Generatoren reproduzierbar bleibt.
+- **Statuswechsel setzen `startedAt`/`finishedAt` clientseitig** (`statusTransitionPatch` in `web/src/hooks/useLibrary.ts`), da der Server diese Felder bei `PATCH` nicht automatisch ableitet.
+- **Client-UUIDv4 ohne `crypto.randomUUID()`** (`web/src/lib/utils.ts`), da dieses API in unsicheren Kontexten (`http://<LAN-IP>:3000`) nicht existiert; es wird `crypto.getRandomValues()` genutzt.
+- **Silent Refresh proaktiv:** `AuthProvider` erneuert das Access Token ~2 min vor Ablauf (und damit das 20-min-`bibliolisa_media`-Cookie), damit Cover-`<img>`-Tags ohne Token in der URL dauerhaft laden.
+- **Dockerfile ohne `pnpm deploy`:** Die Runtime-Stage installiert Produktionsabhängigkeiten per `pnpm install --frozen-lockfile --prod --filter "@bibliolisa/server..."` in einer eigenen Stage und kopiert Workspace-`node_modules` samt Symlinks (`server` → `shared`). Grund: `pnpm deploy` verlangt in pnpm 10 `inject-workspace-packages` bzw. `--legacy` und würde das gebaute `shared/dist` (in `.gitignore`) ggf. nicht mitpacken.
+- **Bugfix aus dem ersten Testlauf:** `@fastify/static` überschrieb `Cache-Control` mit `public, max-age=0`; gelöst über `cacheControl: false` in `server/src/plugins/static.ts`.
+- `@fastify/static` (`^8.1.1`) war bislang nicht in `server/package.json` eingetragen und wurde ergänzt; `WEB_DIR` ist neu (Docker: `/app/public`; Fallback: `web/dist`).
+- Unbekannte `/api/*`-Pfade liefern **mit gültiger Authentifizierung** JSON-`404`, ohne Token weiterhin `401` (globaler Auth-Guard vor dem Routing).
+- `docker-compose.yml`: zusätzliche Variablen `HOST_BIND`/`HOST_PORT` (Bind-Adresse/Port auf dem Host, nie 80/443). Rechte für `./data`: entweder `chown 10001:10001 data` auf dem Host oder einmaliger Start mit `user: "0:0"` (Entrypoint korrigiert Besitzrechte und droppt Rechte per `setpriv`). Bewusst **kein** `cap_drop: ALL`/`read_only`, um diesen Root-Fix-Pfad nicht zu blockieren (ungetestete Härtung vermieden).
 
 ---
 

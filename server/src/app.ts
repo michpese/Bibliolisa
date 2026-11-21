@@ -11,6 +11,7 @@ import { OpenLibraryAdapter } from './metadata/openlibrary.adapter.js';
 import type { FetchLike, MetadataProvider } from './metadata/types.js';
 import { registerAuthGuard } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
+import { registerWebApp, resolveWebDir } from './plugins/static.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerCoverRoutes } from './routes/covers.js';
 import { registerExportRoutes } from './routes/export.js';
@@ -39,6 +40,8 @@ export interface BuildAppOptions {
   metadataFetch?: FetchLike;
   coverFetch?: FetchLike;
   coverDnsLookup?: DnsLookupFn;
+  /** Pfad zum Webapp-Bundle; `null` deaktiviert die statische Auslieferung (Standard: Auto-Erkennung). */
+  webDir?: string | null;
 }
 
 export interface BuiltApp {
@@ -62,6 +65,9 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       dbPath: options.dbPath,
     });
 
+  const webDir =
+    options.webDir !== undefined ? options.webDir : resolveWebDir(env.WEB_DIR);
+
   const app = Fastify({
     trustProxy: env.TRUST_PROXY,
     logger:
@@ -83,7 +89,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     },
   });
 
-  registerErrorHandler(app);
+  registerErrorHandler(app, { spaFallback: webDir !== null });
 
   const authService = new AuthService({
     dbCtx,
@@ -140,6 +146,15 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerSyncRoutes(app, syncService);
   registerRecommendationRoutes(app, libraryService, options.now);
   registerExportRoutes(app, exportService);
+
+  if (webDir !== null) {
+    await registerWebApp(app, webDir);
+    app.log.info({ webDir }, 'Webapp wird unter / ausgeliefert.');
+  } else {
+    app.log.warn(
+      'Kein Webapp-Bundle gefunden (WEB_DIR / web/dist) – es wird nur die API ausgeliefert.'
+    );
+  }
 
   if (ownsDb) {
     app.addHook('onClose', async () => {

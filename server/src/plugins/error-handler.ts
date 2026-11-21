@@ -20,7 +20,15 @@ export class AppError extends Error {
   }
 }
 
-export function registerErrorHandler(app: FastifyInstance): void {
+export interface ErrorHandlerOptions {
+  /** Wenn true, liefern unbekannte Nicht-API-GET/HEAD-Pfade `index.html` (SPA-Fallback). */
+  spaFallback?: boolean;
+}
+
+export function registerErrorHandler(
+  app: FastifyInstance,
+  options: ErrorHandlerOptions = {}
+): void {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
       return reply.status(error.statusCode).send({
@@ -79,7 +87,24 @@ export function registerErrorHandler(app: FastifyInstance): void {
     });
   });
 
-  app.setNotFoundHandler((_request, reply) => {
+  app.setNotFoundHandler((request, reply) => {
+    const pathname = request.url.split('?')[0] ?? request.url;
+    const isApiPath = pathname === '/api' || pathname.startsWith('/api/');
+    const method = request.method.toUpperCase();
+
+    if (
+      options.spaFallback &&
+      !isApiPath &&
+      (method === 'GET' || method === 'HEAD') &&
+      !/\.[a-z0-9]{1,8}$/i.test(pathname)
+    ) {
+      return reply
+        .status(200)
+        .header('Cache-Control', 'no-cache')
+        .header('X-Content-Type-Options', 'nosniff')
+        .sendFile('index.html');
+    }
+
     return reply.status(404).send({
       error: {
         code: 'NOT_FOUND',

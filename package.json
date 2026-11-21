@@ -10,7 +10,10 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "dev:server": "pnpm --filter @bibliolisa/server dev"
+    "dev:server": "pnpm --filter @bibliolisa/server dev",
+    "dev:web": "pnpm --filter @bibliolisa/web dev",
+    "docker:build": "docker build -t bibliolisa:local .",
+    "docker:smoke": "node scripts/docker-smoke-test.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

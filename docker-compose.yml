@@ -1,0 +1,36 @@
+# Bibliolisa – Einzelcontainer-Setup (API + Webapp), ohne eingebauten Reverse Proxy.
+#
+# Start:    cp .env.example .env   # JWT_SECRET setzen!
+#           mkdir -p data && sudo chown -R 10001:10001 data   # Container läuft als UID 10001 (Non-Root)
+#           docker compose up -d --build
+#
+# Der bestehende Host-Reverse-Proxy leitet auf http://127.0.0.1:${HOST_PORT} weiter
+# (X-Forwarded-Proto / X-Forwarded-For werden dank TRUST_PROXY=true ausgewertet).
+services:
+  bibliolisa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bibliolisa:local
+    container_name: bibliolisa
+    restart: unless-stopped
+    init: true
+    # Nicht an 80/443 binden. Für Host-Proxy z. B. HOST_BIND=127.0.0.1, für direkten LAN-Zugriff 0.0.0.0.
+    ports:
+      - "${HOST_BIND:-0.0.0.0}:${HOST_PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+      DATA_DIR: "/data"
+      TRUST_PROXY: "${TRUST_PROXY:-true}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set}"
+      ALLOW_REGISTRATION: "${ALLOW_REGISTRATION:-true}"
+      HARDCOVER_API_KEY: "${HARDCOVER_API_KEY:-}"
+      GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    volumes:
+      # Persistente Daten: SQLite-DB + Cover-Cache. Host-Verzeichnis muss UID 10001 gehören.
+      - ./data:/data
+    # Härtung (Rechte werden bewusst nicht per cap_drop entfernt, damit der optionale Root-Start
+    # `user: "0:0"` das Datenverzeichnis per Entrypoint korrigieren kann).
+    security_opt:
+      - no-new-privileges:true
