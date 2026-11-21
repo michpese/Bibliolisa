@@ -97,6 +97,9 @@ function mountArgs(dataDir) {
 
 async function main() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bibliolisa-smoke-'));
+  // Auf Linux erstellt mkdtempSync das Verzeichnis mit 0700; nach chown 10001:10001
+  // benötigt der Host-Testprozess Lese-/Traverse-Rechte (0755) für fs.existsSync().
+  fs.chmodSync(dataDir, 0o755);
   let started = false;
 
   const cleanup = () => {
