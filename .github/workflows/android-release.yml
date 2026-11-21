@@ -1,0 +1,302 @@
+name: Android APK Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional release tag (e.g. v0.1.0). Creates/updates a GitHub Release if set; leaves empty for artifact-only build.'
+        required: false
+        type: string
+        default: ''
+      architectures:
+        description: 'Android ABIs to package into the APK'
+        required: false
+        type: choice
+        default: 'armeabi-v7a,arm64-v8a'
+        options:
+          - 'armeabi-v7a,arm64-v8a'
+          - 'armeabi-v7a,arm64-v8a,x86,x86_64'
+      prerelease:
+        description: 'Mark GitHub Release as prerelease (only applies when release_tag is set)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build Android APK & Publish Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install required Android SDK components
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Resolve release metadata & update mobile/app.json
+        id: meta
+        shell: bash
+        env:
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_ARCHITECTURES: ${{ inputs.architectures }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+
+            const isTagPush = process.env.GITHUB_REF_TYPE === "tag";
+            const releaseTag = isTagPush
+              ? (process.env.GITHUB_REF_NAME || "").trim()
+              : (process.env.INPUT_RELEASE_TAG || "").trim();
+
+            if (releaseTag && !/^[A-Za-z0-9._-]+$/.test(releaseTag)) {
+              console.error(`Invalid release_tag: "${releaseTag}". Allowed characters: A-Z, a-z, 0-9, ".", "_", "-"`);
+              process.exit(1);
+            }
+
+            const shouldRelease = Boolean(releaseTag);
+            const isPrerelease =
+              process.env.INPUT_PRERELEASE === "true" ||
+              (releaseTag ? releaseTag.includes("-") : false);
+
+            const architectures =
+              (process.env.INPUT_ARCHITECTURES || "").trim() || "armeabi-v7a,arm64-v8a";
+            if (!/^[a-zA-Z0-9_,-]+$/.test(architectures)) {
+              console.error(`Invalid architectures: "${architectures}"`);
+              process.exit(1);
+            }
+
+            const appJsonPath = "mobile/app.json";
+            const appJson = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
+            const baseVersion = appJson.expo?.version || "0.1.0";
+            const runNumber = Math.max(1, Number(process.env.GITHUB_RUN_NUMBER) || 1);
+
+            const versionName = releaseTag
+              ? releaseTag.replace(/^v/, "")
+              : `${baseVersion}-dev.${runNumber}`;
+
+            let versionCode = runNumber;
+            const semverMatch = /^(\d+)\.(\d+)\.(\d+)/.exec(versionName);
+            if (semverMatch) {
+              const major = Number(semverMatch[1]);
+              const minor = Number(semverMatch[2]);
+              const patch = Number(semverMatch[3]);
+              if (minor < 100 && patch < 100) {
+                versionCode = Math.max(1, major * 10000 + minor * 100 + patch);
+              }
+            }
+
+            appJson.expo.version = versionName;
+            appJson.expo.android = appJson.expo.android || {};
+            appJson.expo.android.versionCode = versionCode;
+            fs.writeFileSync(appJsonPath, JSON.stringify(appJson, null, 2) + "\n", "utf8");
+
+            const label = releaseTag || versionName;
+            const apkName = `bibliolisa-${label}.apk`;
+            const artifactName = `bibliolisa-apk-${label}`;
+
+            const outputs = [
+              `release_tag=${releaseTag}`,
+              `should_release=${shouldRelease}`,
+              `is_prerelease=${isPrerelease}`,
+              `version_name=${versionName}`,
+              `version_code=${versionCode}`,
+              `architectures=${architectures}`,
+              `apk_name=${apkName}`,
+              `artifact_name=${artifactName}`,
+            ];
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, outputs.join("\n") + "\n", "utf8");
+          '
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @bibliolisa/shared & run mobile checks
+        run: |
+          pnpm --filter @bibliolisa/shared build
+          pnpm --filter @bibliolisa/mobile typecheck
+          pnpm --filter @bibliolisa/mobile test
+
+      - name: Prepare Android release signing keystore (optional)
+        id: signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            if [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
+              echo "Error: ANDROID_KEYSTORE_BASE64 is set, but ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, or ANDROID_KEY_PASSWORD is missing." >&2
+              exit 1
+            fi
+            KEYSTORE_FILE="${RUNNER_TEMP}/bibliolisa-release.keystore"
+            printf '%s' "${ANDROID_KEYSTORE_BASE64}" | tr -d '\r\n ' | base64 --decode > "${KEYSTORE_FILE}"
+            chmod 600 "${KEYSTORE_FILE}"
+            {
+              echo "mode=release"
+              echo "keystore_path=${KEYSTORE_FILE}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "mode=debug-fallback"
+              echo "keystore_path="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate native Android project via Expo Prebuild
+        env:
+          CI: '1'
+          EXPO_NO_TELEMETRY: '1'
+        run: |
+          pnpm --filter @bibliolisa/mobile exec expo prebuild --platform android --clean --no-install
+          chmod +x mobile/android/gradlew
+          test -f mobile/android/app/src/main/res/xml/network_security_config.xml
+          grep -q '@xml/network_security_config' mobile/android/app/src/main/AndroidManifest.xml
+          grep -q 'BIBLIOLISA_UPLOAD_STORE_FILE' mobile/android/app/build.gradle
+
+      - name: Build Android Release APK
+        working-directory: mobile/android
+        env:
+          TARGET_ARCHS: ${{ steps.meta.outputs.architectures }}
+          ORG_GRADLE_PROJECT_BIBLIOLISA_UPLOAD_STORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          ORG_GRADLE_PROJECT_BIBLIOLISA_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_BIBLIOLISA_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_BIBLIOLISA_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" \
+            -PreactNativeArchitectures="${TARGET_ARCHS}"
+
+      - name: Clean up temporary keystore
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/bibliolisa-release.keystore"
+
+      - name: Verify APK signature, compute SHA-256 & prepare release notes
+        id: package
+        env:
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          TARGET_ARCHS: ${{ steps.meta.outputs.architectures }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+        run: |
+          mkdir -p dist-release
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "dist-release/${APK_NAME}"
+
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --print-certs "dist-release/${APK_NAME}"
+
+          (cd dist-release && sha256sum "${APK_NAME}" > "${APK_NAME}.sha256")
+          SHA256="$(awk '{print $1}' "dist-release/${APK_NAME}.sha256")"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY,,}:${VERSION_NAME}"
+          cat > dist-release/release-notes.md <<EOF
+          ### Android APK
+
+          - **Datei:** \`${APK_NAME}\`
+          - **SHA-256:** \`${SHA256}\`
+          - **Version:** \`${VERSION_NAME}\` (\`versionCode ${VERSION_CODE}\`)
+          - **ABIs:** \`${TARGET_ARCHS}\`
+          - **Signatur:** \`${SIGNING_MODE}\`
+
+          ### Docker-Image (GHCR)
+
+          \`\`\`bash
+          docker pull ${IMAGE_REF}
+          \`\`\`
+          EOF
+
+      - name: Upload APK and checksum artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: |
+            dist-release/${{ steps.meta.outputs.apk_name }}
+            dist-release/${{ steps.meta.outputs.apk_name }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: steps.meta.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: Bibliolisa ${{ steps.meta.outputs.release_tag }}
+          body_path: dist-release/release-notes.md
+          append_body: true
+          generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.is_prerelease == 'true' }}
+          files: |
+            dist-release/${{ steps.meta.outputs.apk_name }}
+            dist-release/${{ steps.meta.outputs.apk_name }}.sha256
+
+      - name: Write job summary
+        env:
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          TARGET_ARCHS: ${{ steps.meta.outputs.architectures }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+          SHOULD_RELEASE: ${{ steps.meta.outputs.should_release }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+        run: |
+          {
+            echo "### Bibliolisa Android APK build summary"
+            echo ""
+            echo "- **APK:** \`${APK_NAME}\`"
+            echo "- **Version:** \`${VERSION_NAME}\` (\`versionCode ${VERSION_CODE}\`)"
+            echo "- **Architectures:** \`${TARGET_ARCHS}\`"
+            echo "- **Signing:** \`${SIGNING_MODE}\`"
+            echo "- **SHA-256:** \`${SHA256}\`"
+            if [ "${SHOULD_RELEASE}" = "true" ]; then
+              echo "- **GitHub Release:** \`${RELEASE_TAG}\`"
+            else
+              echo "- **GitHub Release:** skipped (artifact-only run)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

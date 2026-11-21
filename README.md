@@ -56,6 +56,7 @@ Trage das Secret in `.env` ein und passe bei Bedarf die weiteren Variablen an:
 
 | Variable | Standard | Beschreibung |
 | :--- | :--- | :--- |
+| `BIBLIOLISA_IMAGE` | `ghcr.io/michpese/bibliolisa:latest` | Optionales Container-Image für `docker compose pull` (z. B. `:0.1.0` pinnen) |
 | `JWT_SECRET` | *(Pflicht)* | Signierschlüssel für Access- und Media-Tokens (min. 32 Zeichen) |
 | `HOST_PORT` | `3000` | Host-Port, auf den Port `3000` des Containers gemappt wird (nie `80`/`443`) |
 | `HOST_BIND` | `0.0.0.0` | `0.0.0.0` für direkten LAN-Zugriff, `127.0.0.1` falls nur der lokale Host-Reverse-Proxy zugreifen darf |
@@ -88,7 +89,17 @@ chmod 750 data
 
 Alternativ kann `./data:/data` in `docker-compose.yml` durch ein Named Volume (z. B. `bibliolisa_data:/data`) ersetzt werden; Docker übernimmt dann beim ersten Start die `10001:10001`-Rechte aus dem Image automatisch.
 
-### Schritt 3: Container bauen & starten
+### Schritt 3: Container starten (GHCR-Image oder lokaler Build)
+
+**Variante 1 – Vorgebautes Image aus der GitHub Container Registry (GHCR) ziehen:**
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Optional lässt sich in `.env` ein festes Release-Tag pinnen, z. B. `BIBLIOLISA_IMAGE=ghcr.io/michpese/bibliolisa:0.1.0`.
+
+**Variante 2 – Image lokal aus dem Quellcode bauen:**
 
 ```bash
 docker compose up -d --build
@@ -120,7 +131,8 @@ Erwartete Antwort (`200 OK`):
 ### Betrieb, Updates & Backup
 
 - **Logs einsehen:** `docker compose logs -f bibliolisa`
-- **Update einspielen:** `git pull && docker compose up -d --build` (SQLite-Migrationen laufen beim Start automatisch)
+- **Update einspielen (GHCR):** `docker compose pull && docker compose up -d` (SQLite-Migrationen laufen beim Start automatisch)
+- **Update einspielen (lokaler Build):** `git pull && docker compose up -d --build`
 - **Dateibasiertes Backup (Server gestoppt):** `docker compose stop && tar -czf bibliolisa-backup-$(date +%F).tar.gz data .env && docker compose start`
 - **Benutzer-Backup über UI:** In der Webapp unter **Backup** jederzeit als vollständiges JSON oder CSV herunterladbar.
 
@@ -198,7 +210,7 @@ Die Android-App unter [`mobile/`](mobile/package.json) ist über das Config-Plug
 #### Voraussetzungen
 - **Node.js 22 LTS** & **pnpm 10+** (`corepack enable`)
 - **JDK 17** (z. B. Temurin 17; `JAVA_HOME` gesetzt)
-- **Android SDK** (API Level 35 / Build-Tools / Platform-Tools / NDK passend zu Expo SDK 54; `ANDROID_HOME` bzw. `ANDROID_SDK_ROOT` gesetzt)
+- **Android SDK** (API Level 36 / Build-Tools `36.0.0` / Platform-Tools / NDK `27.1.12297006` passend zu Expo SDK 54 / RN 0.81; `ANDROID_HOME` bzw. `ANDROID_SDK_ROOT` gesetzt)
 
 #### Schritte
 
@@ -336,4 +348,49 @@ pnpm build
 # Docker-Image bauen & kompletten Container-Smoke-Test ausführen
 pnpm docker:build
 pnpm docker:smoke
+```
+
+---
+
+## 5. GitHub Actions CI/CD (GHCR-Image & Android-APK-Releases)
+
+Das Repository enthält zwei Workflows unter `.github/workflows/`:
+
+### Docker-Image in GHCR ([`.github/workflows/docker.yml`](.github/workflows/docker.yml))
+
+- **Trigger:**
+  - `push` auf `main` sowie Tags `v*` (bei Code-/Docker-Änderungen auf `main`; Tag-Pushes laufen immer)
+  - `pull_request` auf `main` (führt Build + kompletten Container-Smoke-Test ohne Push aus)
+  - `workflow_dispatch` (manuell mit Plattformwahl `linux/amd64,linux/arm64` oder `linux/amd64`)
+- **Ablauf:** Baut zuerst ein `linux/amd64`-Image und prüft es gegen [`scripts/docker-smoke-test.mjs`](scripts/docker-smoke-test.mjs); erst bei Erfolg wird das Multi-Arch-Image (`linux/amd64`, `linux/arm64`) nach `ghcr.io/michpese/bibliolisa` gepusht.
+- **Image-Tags:** `latest` (Standard-Branch), `main`, `<version>` & `<major>.<minor>` (bei SemVer-Tags wie `v0.1.0`), `sha-<commit>`.
+- **Hinweis zur Sichtbarkeit:** Das erste automatisch angelegte GHCR-Package ist bei GitHub ggf. zunächst *private*. Soll `docker compose pull` ohne `docker login ghcr.io` funktionieren, unter **GitHub → Packages → bibliolisa → Package settings → Change visibility** auf *Public* umstellen (oder alternativ einmalig mit einem PAT `read:packages` einloggen).
+
+### Android-APK als GitHub Release ([`.github/workflows/android-release.yml`](.github/workflows/android-release.yml))
+
+- **Trigger:**
+  - `push` auf Tags `v*` (baut die Standalone-APK und erstellt/aktualisiert automatisch das passende GitHub Release mit `.apk` und `.apk.sha256`)
+  - `workflow_dispatch` (optional mit `release_tag`, `architectures` und `prerelease`; ohne `release_tag` wird die APK nur als Workflow-Artifact hochgeladen)
+- **Ablauf:** Installiert Workspace-Abhängigkeiten, baut `@bibliolisa/shared`, führt `typecheck` und `test` in `mobile/` aus, generiert das native Android-Projekt per `expo prebuild --platform android --clean --no-install` (inkl. `withLanNetworkSecurity` und `withAndroidReleaseSigning`), kompiliert `./gradlew assembleRelease` und verifiziert die Signatur mit `apksigner`.
+- **Release-Signatur (optional über Repository Secrets):**
+  Ohne Secrets nutzt Gradle automatisch Expos deterministischen Debug-Fallback-Keystore (direkt installierbar per Sideloading). Für einen eigenen dauerhaften Signierschlüssel lassen sich folgende vier GitHub Repository Secrets hinterlegen:
+  - `ANDROID_KEYSTORE_BASE64`
+  - `ANDROID_KEYSTORE_PASSWORD`
+  - `ANDROID_KEY_ALIAS`
+  - `ANDROID_KEY_PASSWORD`
+
+  Keystore einmalig erzeugen und für `ANDROID_KEYSTORE_BASE64` Base64-kodieren (ohne Zeilenumbrüche):
+  ```bash
+  keytool -genkeypair -v -storetype PKCS12 -keystore bibliolisa-release.keystore \
+    -alias bibliolisa -keyalg RSA -keysize 2048 -validity 10000
+  base64 -w 0 bibliolisa-release.keystore
+  ```
+
+### Gemeinsames Release (Docker-Image + Android-APK) auslösen
+
+Ein einzelner SemVer-Tag stößt beide Workflows gleichzeitig an:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
