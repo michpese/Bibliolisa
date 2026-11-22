@@ -39,19 +39,55 @@ function formatSeriesNumber(value: number): string {
   return String(value);
 }
 
-function isUnstartedSequel(
+function normalizeSeriesKey(
+  seriesName: string | null | undefined
+): string | null {
+  const trimmed = seriesName?.trim();
+  if (!trimmed) return null;
+  return normalizeKey(trimmed);
+}
+
+function getValidSeriesNumber(entry: LibraryEntry): number | null {
+  const num = entry.book.seriesNumber;
+  return num !== null && Number.isFinite(num) ? num : null;
+}
+
+function compareBySeriesNumberThenTitle(
+  a: LibraryEntry,
+  b: LibraryEntry
+): number {
+  const numDiff =
+    (getValidSeriesNumber(a) ?? 0) - (getValidSeriesNumber(b) ?? 0);
+  if (numDiff !== 0) return numDiff;
+  return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);
+}
+
+function compareByTitleThenId(a: LibraryEntry, b: LibraryEntry): number {
+  return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);
+}
+
+/**
+ * Kategorieübergreifende Reihen-Schutzregel:
+ * - Einzelbände (ohne gültigen Reihennamen) sind immer zulässig.
+ * - Begonnene Reihen erlauben höchstens den einen nächsten offenen Band aus Stufe 1.
+ * - Unbegonnene Reihen erlauben nur unnummerierte Bände oder Band <= 1.
+ */
+function isSeriesEligibleForRecommendation(
   entry: LibraryEntry,
-  startedSeriesKeys: ReadonlySet<string>
+  startedSeriesKeys: ReadonlySet<string>,
+  nextEligibleEntryIdByStartedSeries: ReadonlyMap<string, string>
 ): boolean {
-  const seriesKey = entry.book.seriesName?.trim()
-    ? normalizeKey(entry.book.seriesName)
-    : null;
-  return (
-    seriesKey !== null &&
-    !startedSeriesKeys.has(seriesKey) &&
-    entry.book.seriesNumber !== null &&
-    entry.book.seriesNumber > 1
-  );
+  const seriesKey = normalizeSeriesKey(entry.book.seriesName);
+  if (seriesKey === null) {
+    return true;
+  }
+
+  if (startedSeriesKeys.has(seriesKey)) {
+    return nextEligibleEntryIdByStartedSeries.get(seriesKey) === entry.id;
+  }
+
+  const seriesNumber = getValidSeriesNumber(entry);
+  return seriesNumber === null || seriesNumber <= 1;
 }
 
 /**
@@ -261,9 +297,9 @@ export function generateRecommendations(
   >();
 
   for (const entry of activeEntries) {
-    const rawSeries = entry.book.seriesName?.trim();
-    if (!rawSeries) continue;
-    const key = normalizeKey(rawSeries);
+    const key = normalizeSeriesKey(entry.book.seriesName);
+    if (key === null) continue;
+    const rawSeries = entry.book.seriesName!.trim();
     const group = seriesGroups.get(key) ?? {
       displayName: rawSeries,
       started: [],
@@ -278,6 +314,7 @@ export function generateRecommendations(
   }
 
   const startedSeriesKeys = new Set<string>();
+  const nextEligibleEntryIdByStartedSeries = new Map<string, string>();
   const stage1Candidates: Array<{
     item: RecommendationItem;
     hasReading: boolean;
@@ -291,61 +328,70 @@ export function generateRecommendations(
     startedSeriesKeys.add(seriesKey);
     if (group.unread.length === 0) continue;
 
-    const numberedStarted = group.started.filter(
-      (e): e is LibraryEntry & { book: { seriesNumber: number } } =>
-        e.book.seriesNumber !== null
-    );
+    const numberedStarted = group.started
+      .map((e) => getValidSeriesNumber(e))
+      .filter((n): n is number => n !== null);
     const maxProgress =
-      numberedStarted.length > 0
-        ? Math.max(...numberedStarted.map((e) => e.book.seriesNumber))
-        : null;
+      numberedStarted.length > 0 ? Math.max(...numberedStarted) : null;
 
     let picked: LibraryEntry | undefined;
     let reasonCode: RecommendationReasonCode = 'next_in_series';
 
     if (maxProgress !== null) {
+      // Ganze Zwischenbände dürfen nicht übersprungen werden; Dezimalbände (z. B. 1.5 zwischen 1 und 2) bleiben erlaubt.
+      const maxAllowedNext = Math.floor(maxProgress) + 1;
       const nextVolumes = group.unread
-        .filter((e) => e.book.seriesNumber !== null && e.book.seriesNumber > maxProgress)
-        .sort((a, b) => {
-          const diff = (a.book.seriesNumber ?? 0) - (b.book.seriesNumber ?? 0);
-          if (diff !== 0) return diff;
-          return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);
-        });
+        .filter((e) => {
+          const num = getValidSeriesNumber(e);
+          return num !== null && num > maxProgress && num <= maxAllowedNext;
+        })
+        .sort(compareBySeriesNumberThenTitle);
       if (nextVolumes[0] !== undefined) {
         picked = nextVolumes[0];
         reasonCode = 'next_in_series';
       } else {
         const gapVolumes = group.unread
-          .filter((e) => e.book.seriesNumber !== null && e.book.seriesNumber < maxProgress)
-          .sort((a, b) => {
-            const diff = (a.book.seriesNumber ?? 0) - (b.book.seriesNumber ?? 0);
-            if (diff !== 0) return diff;
-            return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);
-          });
+          .filter((e) => {
+            const num = getValidSeriesNumber(e);
+            return num !== null && num < maxProgress;
+          })
+          .sort(compareBySeriesNumberThenTitle);
         if (gapVolumes[0] !== undefined) {
           picked = gapVolumes[0];
           reasonCode = 'series_gap';
+        } else {
+          const unnumberedUnread = group.unread
+            .filter((e) => getValidSeriesNumber(e) === null)
+            .sort(compareByTitleThenId);
+          if (unnumberedUnread[0] !== undefined) {
+            picked = unnumberedUnread[0];
+            reasonCode = 'series_unnumbered';
+          }
+        }
+      }
+    } else {
+      const starterVolumes = group.unread
+        .filter((e) => {
+          const num = getValidSeriesNumber(e);
+          return num !== null && num <= 1;
+        })
+        .sort(compareBySeriesNumberThenTitle);
+      if (starterVolumes[0] !== undefined) {
+        picked = starterVolumes[0];
+        reasonCode = 'next_in_series';
+      } else {
+        const unnumberedUnread = group.unread
+          .filter((e) => getValidSeriesNumber(e) === null)
+          .sort(compareByTitleThenId);
+        if (unnumberedUnread[0] !== undefined) {
+          picked = unnumberedUnread[0];
+          reasonCode = 'series_unnumbered';
         }
       }
     }
 
-    if (picked === undefined) {
-      const fallback = [...group.unread].sort((a, b) => {
-        const aNull = a.book.seriesNumber === null ? 1 : 0;
-        const bNull = b.book.seriesNumber === null ? 1 : 0;
-        if (aNull !== bNull) return aNull - bNull;
-        const numDiff = (a.book.seriesNumber ?? 0) - (b.book.seriesNumber ?? 0);
-        if (numDiff !== 0) return numDiff;
-        return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);
-      });
-      picked = fallback[0];
-      reasonCode =
-        picked?.book.seriesNumber !== null && picked?.book.seriesNumber !== undefined
-          ? 'next_in_series'
-          : 'series_unnumbered';
-    }
-
     if (picked === undefined) continue;
+    nextEligibleEntryIdByStartedSeries.set(seriesKey, picked.id);
 
     const hasReading = group.started.some((e) => e.status === 'reading');
     const ratings = group.started
@@ -367,9 +413,10 @@ export function generateRecommendations(
     const seriesDisplayName = picked.book.seriesName?.trim() || group.displayName;
     const ratingHint =
       ratings.length > 0 ? ` (bisher Ø ${formatDecimalComma(avgRating)}★)` : '';
+    const pickedSeriesNumber = getValidSeriesNumber(picked);
     const numLabel =
-      picked.book.seriesNumber !== null
-        ? ` (#${formatSeriesNumber(picked.book.seriesNumber)})`
+      pickedSeriesNumber !== null
+        ? ` (#${formatSeriesNumber(pickedSeriesNumber)})`
         : '';
 
     let reasonText: string;
@@ -414,22 +461,26 @@ export function generateRecommendations(
     .slice(0, limitPerCategory)
     .map((c) => c.item);
 
+  // Einheitliche Kandidatenmenge für Stufe 2 & 3 (kategorieübergreifende Reihen-Schutzregel)
+  const eligibleUnreadEntries = unreadEntries.filter((entry) =>
+    isSeriesEligibleForRecommendation(
+      entry,
+      startedSeriesKeys,
+      nextEligibleEntryIdByStartedSeries
+    )
+  );
+
   // --- Stufe 2: Autoren- & Genre-Affinität ---
   const { authors: authorMap, genres: genreMap } = computeAffinityProfile(activeEntries);
 
   const affinityByEntryId = new Map<string, number>();
   const stage2Candidates: Array<{ entry: LibraryEntry; item: RecommendationItem }> = [];
 
-  for (const entry of unreadEntries) {
+  for (const entry of eligibleUnreadEntries) {
     const affinity = scoreEntryAffinity(entry, authorMap, genreMap);
     affinityByEntryId.set(entry.id, affinity.rawScore);
 
     if (stage1UserBookIds.has(entry.id)) {
-      continue;
-    }
-
-    // Reihen-Schutzregel: keine Fortsetzungen (> Band 1) einer noch nicht begonnenen Reihe
-    if (isUnstartedSequel(entry, startedSeriesKeys)) {
       continue;
     }
 
@@ -487,13 +538,12 @@ export function generateRecommendations(
     .map((c) => c.item);
 
   // --- Stufe 3a: Schneller Read (< 300 Seiten) ---
-  const quickReadCandidates = unreadEntries
+  const quickReadCandidates = eligibleUnreadEntries
     .filter(
       (entry): entry is LibraryEntry & { book: { pageCount: number } } =>
         entry.book.pageCount !== null &&
         entry.book.pageCount > 0 &&
-        entry.book.pageCount < 300 &&
-        !isUnstartedSequel(entry, startedSeriesKeys)
+        entry.book.pageCount < 300
     )
     .sort((a, b) => {
       const pageDiff = a.book.pageCount - b.book.pageCount;
@@ -519,8 +569,7 @@ export function generateRecommendations(
 
   // --- Stufe 3b: Staubfänger (älteste ungelesene Bücher zuerst) ---
   const nowMs = now.getTime();
-  const dustCollectorCandidates = unreadEntries
-    .filter((entry) => !isUnstartedSequel(entry, startedSeriesKeys))
+  const dustCollectorCandidates = [...eligibleUnreadEntries]
     .sort((a, b) => {
       if (a.addedAt !== b.addedAt) return a.addedAt < b.addedAt ? -1 : 1;
       return a.book.title.localeCompare(b.book.title) || a.id.localeCompare(b.id);
@@ -546,17 +595,9 @@ export function generateRecommendations(
     });
 
   // --- Stufe 3c: Überrasch mich (deterministischer Mulberry32-Shuffle) ---
-  const sortedUnreadForSeed = [...unreadEntries].sort((a, b) =>
+  const surprisePool = [...eligibleUnreadEntries].sort((a, b) =>
     a.id.localeCompare(b.id)
   );
-  const preferredPool = sortedUnreadForSeed.filter(
-    (entry) =>
-      entry.book.seriesName === null ||
-      entry.book.seriesNumber === null ||
-      entry.book.seriesNumber <= 1
-  );
-  const surprisePool =
-    preferredPool.length > 0 ? preferredPool : sortedUnreadForSeed;
   const surpriseCandidates = shuffleWithSeed(surprisePool, seed)
     .slice(0, limitPerCategory)
     .map((entry, idx) =>

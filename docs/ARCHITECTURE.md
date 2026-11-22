@@ -929,19 +929,30 @@ export interface MetadataProvider {
 
 Die komplette Empfehlungslogik liegt als reine, seiteneffektfreie TypeScript-Funktion (`generateRecommendations(entries, options)`) im Paket `@bibliolisa/shared` (`shared/src/recommendations/engine.ts`). Dadurch liefert `GET /api/recommendations` auf dem Server exakt dieselben Ergebnisse wie die komplett offline laufende Android-App auf dem lokalen `expo-sqlite`-Bestand.
 
-### 8.1 Grundprinzip & Kandidatenmenge
+### 8.1 Grundprinzip, Kandidatenmenge & kategorieübergreifende Reihen-Schutzregel
 
-- **Kandidatenmenge:** Ausschließlich aktive Einträge (`deletedAt === null`) des jeweiligen Benutzers mit `status === 'unread'`.
+- **Kandidatenmenge:** Ausschließlich aktive Einträge (`deletedAt === null`, `book.deletedAt === null`) des jeweiligen Benutzers mit `status === 'unread'`.
+- **Reihen-Normalisierung:** `seriesName` wird per `trim().toLowerCase()` normalisiert. `null` sowie leere oder reine Whitespace-Werte gelten als Einzelband ohne Reihe.
+- **Kategorieübergreifende Reihen-Schutzregel (gilt in allen 5 Kategorien):**
+  - **Unbegonnene Buchreihen** (kein aktiver Band auf `read` oder `reading`; `abandoned` zählt nicht als begonnen): Es werden **niemals** Bände mit `seriesNumber > 1` empfohlen – auch nicht in `quick_read`, `dust_collector` oder als Fallback in `surprise_me`. Zulässig sind ausschließlich Band `<= 1` oder `seriesNumber === null`.
+  - **Begonnene Buchreihen** (mindestens ein aktiver Band auf `read` oder `reading`): Pro Reihe ist höchstens der **einzige nächste offene Band** aus Stufe 1 empfehlungsfähig (`eligibleUnreadEntries`); alle übrigen (insbesondere späteren) Bände derselben Reihe bleiben in sämtlichen Kategorien gesperrt.
 - **Transparente Begründung:** Jede zurückgegebene Empfehlung enthält `{ userBookId, bookId, category, score, reasonCode, reasonText }`, sodass in Webapp und Android-App immer ein konkreter deutscher Erklärungstext angezeigt wird.
 
 ### 8.2 Dreistufiges Regelwerk
 
 #### Stufe 1: Begonnene Buchreihen fortsetzen (`continue_series` – höchste Priorität)
 
-1. Ermittle alle normalisierten Buchreihen (`seriesName`), in denen der Benutzer mindestens ein Buch mit `status IN ('read', 'reading')` besitzt.
-2. Bestimme pro begonnener Reihe den höchsten bisherigen Fortschritt `maxProgress = max(seriesNumber)` über alle Bände mit `status IN ('read', 'reading')`.
-3. Suche unter den `unread`-Büchern derselben Reihe den Band mit der **kleinsten** `seriesNumber > maxProgress` (unterstützt Dezimalbände wie `1 -> 1.5 -> 2`).
-   - *Sonderfall ohne vergebene Bandnummer:* Existieren unnummerierte Bände oder ältere ungelesene Lücken (`seriesNumber < maxProgress` bei mindestens einem `unread`-Band), wird eine fehlende Lücke sekundär vorgeschlagen, falls kein Band `> maxProgress` vorliegt.
+1. Ermittle alle normalisierten Buchreihen (`seriesName`), in denen der Benutzer mindestens ein Buch mit `status IN ('read', 'reading')` besitzt (`abandoned` zählt nicht zum Fortschritt).
+2. Bestimme pro begonnener Reihe den höchsten bisherigen Fortschritt `maxProgress = max(seriesNumber)` über alle nummerierten Bände mit `status IN ('read', 'reading')`.
+3. Ermittle pro begonnener Reihe höchstens **einen** nächsten offenen `unread`-Band:
+   - **Bei nummeriertem Fortschritt (`maxProgress !== null`):**
+     1. Primär (`next_in_series`): Der `unread`-Band mit der **kleinsten** Bandnummer im Intervall `maxProgress < seriesNumber <= Math.floor(maxProgress) + 1`. Dadurch bleiben Dezimalbände/Novellas (z. B. `1 -> 1.5 -> 2`) zulässig, während fehlende ganze Zwischenbände (z. B. Band `1` gelesen, Band `2–3` fehlen, Band `4` vorhanden) niemals übersprungen werden.
+     2. Sekundär (`series_gap`): Falls kein direkter Folgeband im zulässigen Intervall vorliegt, der kleinste ältere ungelesene Band (`seriesNumber < maxProgress`).
+     3. Tertiär (`series_unnumbered`): Falls auch keine Lücke existiert, der erste unnummerierte Band (`seriesNumber === null`, alphabetisch nach Titel).
+   - **Bei rein unnummeriertem Fortschritt (`maxProgress === null`):**
+     1. Primär (`next_in_series`): Der kleinste Band mit `seriesNumber <= 1`.
+     2. Sekundär (`series_unnumbered`): Der erste unnummerierte Band (`seriesNumber === null`).
+     3. Nummerierte Folgebände (`seriesNumber > 1`) werden auch hier **niemals** gewählt.
 4. **Reihenfolge innerhalb Stufe 1:**
    1. Reihen mit aktuell aktiv gelesenem Band (`status === 'reading'`) zuerst.
    2. Höchste Durchschnittsbewertung der bereits bewerteten Bände dieser Reihe (Default `3.5`, falls noch unbewertet).
@@ -957,22 +968,23 @@ Die komplette Empfehlungslogik liegt als reine, seiteneffektfreie TypeScript-Fun
      - `abandoned`: `-2.0` (bzw. `(rating - 3.0) * 2.0`, falls bewertet).
    - **Autoren-Affinität:** Gedämpfte Summe über alle gelesenen/abgebrochenen Bücher des Autors, sodass ein einzelner Ausreißer nicht unbegrenzt dominiert (`sumWeight / (1 + 0.35 * (count - 1))`).
    - **Genre-Affinität (Bayesian Smoothing):** `sumWeight / (count + 2.0)`, damit ein einmalig gelesenes Nischen-Genre nicht ein dauerhaft hoch bewertetes Haupt-Genre übertrifft.
-2. **Scoring der verbleibenden `unread`-Bücher** (ohne die bereits in Stufe 1 platzierten nächsten Reihentitel):
+2. **Scoring der vorgefilterten `eligibleUnreadEntries`** (ohne die bereits in Stufe 1 platzierten nächsten Reihentitel und bereits strikt gemäß Abschnitt 8.1 gefiltert):
    - `authorScore = max(authorAffinity für book.authors)` (Standard `0`).
    - `genreScore = Durchschnitt der Top-2 positiven/vorhandenen Genre-Affinitäten des Buches` (Standard `0`).
    - `rawScore = 0.60 * authorScore + 0.40 * genreScore`.
-   - **Reihen-Schutzregel:** Handelt es sich bei einem `unread`-Buch um Band `seriesNumber > 1` einer **noch nicht begonnenen** Reihe, wird ein Malus (`-4.0`) vergeben bzw. der Titel in Stufe 2 ausgefiltert, um keine Fortsetzungen ohne Band 1 zu empfehlen.
 3. *Beispiel-Begründung:*
    - Bei starkem Autor: `Von Brandon Sanderson – du hast seine Bücher im Schnitt mit 4,8★ bewertet.`
    - Bei starkem Genre: `Passt zu deinen Top-Genres „High Fantasy“ und „Sci-Fi“.`
 
 #### Stufe 3: Quick-Filter
 
+Alle drei Quick-Filter arbeiten ausschließlich auf den nach Abschnitt 8.1 reihen-zulässigen `unread`-Büchern (`eligibleUnreadEntries`):
+
 | Filter-Schlüssel | UI-Label | Auswahlregel & Sortierung | Beispiel-Begründung |
 | :--- | :--- | :--- | :--- |
-| `quick_read` | **Schneller Read** | `status === 'unread'` und `pageCount !== null && pageCount > 0 && pageCount < 300`; sortiert nach `pageCount ASC`, Tie-Breaker `affinityScore DESC`. | `Kompakter Umfang mit nur 214 Seiten.` |
-| `dust_collector` | **Staubfänger** | Alle `status === 'unread'`; sortiert nach `addedAt ASC` (älteste Einträge zuerst). | `Seit 412 Tagen auf deinem Lesestapel.` |
-| `surprise_me` | **Überrasch mich** | Deterministischer Mulberry32-PRNG auf Basis eines optionalen `seed` (Query-Param oder UI-Würfel-Button); bevorzugt Einzelbände oder Band `1` (`seriesNumber == null || seriesNumber <= 1`). | `Zufällige Auswahl aus deinem Ungelesen-Stapel.` |
+| `quick_read` | **Schneller Read** | `eligibleUnreadEntries` mit `pageCount !== null && pageCount > 0 && pageCount < 300`; sortiert nach `pageCount ASC`, Tie-Breaker `affinityScore DESC`. | `Kompakter Umfang mit nur 214 Seiten.` |
+| `dust_collector` | **Staubfänger** | Alle `eligibleUnreadEntries`; sortiert nach `addedAt ASC` (älteste Einträge zuerst). | `Seit 412 Tagen auf deinem Lesestapel.` |
+| `surprise_me` | **Überrasch mich** | Deterministischer Mulberry32-PRNG auf `eligibleUnreadEntries` mittels optionalem `seed` (Query-Param oder UI-Würfel-Button); kein Fallback auf gesperrte Folgebände (liefert im Zweifel `[]`). | `Zufällige Auswahl aus deinem Ungelesen-Stapel.` |
 
 ---
 
