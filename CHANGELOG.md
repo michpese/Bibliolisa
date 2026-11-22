@@ -6,6 +6,30 @@ Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1
 
 ---
 
+## [0.2.1] - 2026-11-22
+
+### ✨ Highlights
+
+- **Zuverlässige Reihenfolge bei Buchreihen-Empfehlungen:** In „Was lese ich als Nächstes?“ werden in keiner Kategorie mehr spätere Folgebände vorgeschlagen, solange frühere Bände noch ungelesen sind – identisch auf Server, Webapp und offline in der Android-App.
+
+### 🐛 Fehlerbehebungen
+
+- **Unbegonnene Buchreihen (`shared`, `server`, `web`, `mobile`):** Reihen ohne gelesenen oder aktuell gelesenen Band schlagen in keiner Empfehlungskategorie (`continue_series`, `affinity`, `quick_read`, `dust_collector`, `surprise_me`) mehr Bände mit `seriesNumber > 1` vor – auch nicht mehr als Fallback in „Überrasch mich“.
+- **Begonnene Buchreihen:** Pro begonnener Reihe ist über alle fünf Kategorien hinweg höchstens noch der eine nächste offene Band zulässig; spätere Bände (z. B. Band 3 oder 4) rutschen nicht mehr in „Empfohlen für dich“, „Schneller Read“, „Staubfänger“ oder „Überrasch mich“.
+- **Fehlende Zwischenbände & Dezimalbände:** Bei nummeriertem Reihenfortschritt (`maxProgress`) werden direkte Folgebände auf `maxProgress < seriesNumber <= Math.floor(maxProgress) + 1` begrenzt. Dezimalbände/Novellas (z. B. `1 → 1.5 → 2`) bleiben zulässig, fehlende ganze Zwischenbände (z. B. Band 1 gelesen, Band 2–3 nicht vorhanden, Band 4 vorhanden) werden nicht mehr übersprungen.
+- **Reihen-Edge-Cases (`abandoned`, `seriesNumber === null`, `seriesName`):** Abgebrochene Bücher zählen nicht als Reihenfortschritt, unnummerierte Bände schalten keine nummerierten Folgebände `> 1` frei, und leere/Whitespace- sowie unterschiedlich geschriebene `seriesName`-Werte werden einheitlich normalisiert.
+
+### 📚 Dokumentation & Tests
+
+- **Architektur-Spezifikation (`docs/ARCHITECTURE.md`):** Kapitel 8 um die kategorieübergreifende Reihen-Schutzregel und das Intervall für fehlende Zwischenbände präzisiert.
+- **Automatisierte Tests (`shared` & `server`):** Gezielte Unit-Tests in `shared/tests/recommendations.test.ts` sowie API-Integrationstests in `server/tests/recommendations.test.ts` für unbegonnene Reihen, begonnene Reihen, Dezimalbände, fehlende Zwischenbände, `surprise_me`-Fallback und Edge Cases ergänzt.
+
+### 💾 Hinweis zum Update
+
+Bestehende Android-Installationen ab `v0.2.0` (mit demselben Release-Keystore) können das Update direkt über **Einstellungen → App-Updates** ohne Deinstallation einspielen; alle lokalen Bücher, Cover, Notizen, Bewertungen und Sync-Einstellungen bleiben vollständig erhalten.
+
+---
+
 ## [0.2.0] - 2026-11-21
 
 ### ✨ Highlights

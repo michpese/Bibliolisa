@@ -275,3 +275,10 @@ Verifikation (ausgeführt, grün):
   - Native Download- & Installer-Brücke in `mobile/src/services/app-updater.ts` (`expo-application`, `expo-file-system/legacy` Streaming-Download nach `Paths.cache/updates/`, Größen-/ZIP-Magic-Prüfung, `FileSystemFileProvider`-Content-URI via `expo-intent-launcher`).
   - Automatische Startprüfung + manueller Update-Button in den Einstellungen (`UpdateContext.tsx`, `UpdateModal.tsx`, `SettingsScreen.tsx`) mit explizitem Hinweis und verifiziertem Erhalt aller Benutzerdaten (SQLite + Cover-Cache + `SecureStore`).
 - **Release- & Changelog-Pipeline:** `CHANGELOG.md` + `scripts/extract-changelog.mjs` binden Release-Highlights automatisch in `.github/workflows/android-release.yml` ein (Version `0.2.0` / `versionCode 20099`, `REQUEST_INSTALL_PACKAGES`).
+
+---
+
+## Nach-Phase-5: Empfehlungs-Reihenschutz (`v0.2.1`)
+
+- **Kategorieübergreifender Reihenschutz (`shared`):** Einheitliche Reihen-Zulässigkeitsprüfung (`isSeriesEligibleForRecommendation`) in `shared/src/recommendations/engine.ts` für alle 5 Empfehlungskategorien (keine unbegonnenen Folgebände `> 1`, kein unsicherer `surprise_me`-Fallback, maximal ein nächster offener Band pro begonnener Reihe, keine übersprungenen ganzen Zwischenbände bei Beibehaltung von Dezimalbänden wie `1.5`, konsistente Behandlung von `abandoned`, `seriesNumber === null` und `seriesName`-Normalisierung).
+- **Tests, Doku & Release:** Erweiterte Testsuiten (`shared/tests/recommendations.test.ts`, `server/tests/recommendations.test.ts`, `mobile/tests/app-updater.test.ts`), aktualisiertes Kapitel 8 in `docs/ARCHITECTURE.md` sowie Release-Vorbereitung für `v0.2.1` (`versionCode 20199`) in `CHANGELOG.md` und allen Workspace-Manifesten.

@@ -349,6 +349,16 @@ describe('GitHub-Release-Parsing & Update-Check', () => {
     const changelogPath = path.resolve(__dirname, '..', '..', 'CHANGELOG.md');
     const changelogMd = fs.readFileSync(changelogPath, 'utf8');
 
+    const sec021 = extractChangelogSection(changelogMd, 'v0.2.1');
+    expect(sec021).toContain('### ✨ Highlights');
+    expect(sec021).toContain('Zuverlässige Reihenfolge bei Buchreihen-Empfehlungen');
+    expect(sec021).not.toContain('## [0.2.0]');
+    expect(extractChangelogSection(changelogMd, '0.2.1')).toBe(sec021);
+
+    const blocks021 = formatReleaseNotesForDisplay(sec021);
+    expect(blocks021.some((block) => block.type === 'heading')).toBe(true);
+    expect(blocks021.some((block) => block.type === 'bullet')).toBe(true);
+
     const sec020 = extractChangelogSection(changelogMd, 'v0.2.0');
     expect(sec020).toContain('### ✨ Highlights');
     expect(sec020).toContain('Android In-App-Updates');
