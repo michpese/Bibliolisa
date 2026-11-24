@@ -87,3 +87,8 @@ export const SyncStatusResponseSchema = z.object({
   devices: z.array(SyncDeviceStatusSchema),
 });
 export type SyncStatusResponse = z.infer<typeof SyncStatusResponseSchema>;
+
+export const SyncDeviceIdParamSchema = z.object({
+  deviceId: z.string().trim().min(1).max(128),
+});
+export type SyncDeviceIdParam = z.infer<typeof SyncDeviceIdParamSchema>;

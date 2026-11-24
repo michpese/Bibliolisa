@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Settings,
   Smartphone,
+  Trash2,
 } from 'lucide-react';
 import { errorMessage } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -23,7 +24,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/misc';
-import { useSyncStatus } from '@/hooks/useSyncStatus';
+import { useRemoveSyncDevice, useSyncStatus } from '@/hooks/useSyncStatus';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -127,6 +128,7 @@ export function WebSyncBadge({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmDeviceId, setConfirmDeviceId] = useState<string | null>(null);
   const {
     data,
     isLoading,
@@ -137,6 +139,7 @@ export function WebSyncBadge({
     isManualSyncing,
     triggerManualSync,
   } = useSyncStatus();
+  const removeDevice = useRemoveSyncDevice();
 
   const busy = isLoading || isFetching || isManualSyncing;
   const presentation = getWebSyncPresentation(data, {
@@ -164,7 +167,13 @@ export function WebSyncBadge({
         <span>{presentation.pillLabel}</span>
       </button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (!nextOpen) setConfirmDeviceId(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Synchronisations-Status</DialogTitle>
@@ -223,53 +232,123 @@ export function WebSyncBadge({
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {data.devices.map((device) => (
-                    <li
-                      key={device.deviceId}
-                      className="space-y-1 rounded-lg border bg-background p-3 text-xs"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
-                          <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
-                          {device.deviceName ?? 'Android-Gerät'}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <Badge
-                            className={
-                              device.sessionActive
-                                ? 'bg-primary/15 text-primary'
-                                : 'bg-muted text-muted-foreground'
-                            }
-                          >
-                            {device.sessionActive ? 'Aktiv' : 'Abgemeldet'}
-                          </Badge>
-                          <Badge
-                            className={
-                              device.isUpToDate
-                                ? 'bg-success/15 text-success'
-                                : 'bg-warning/15 text-warning'
-                            }
-                          >
-                            {device.isUpToDate
-                              ? 'Aktuell'
-                              : device.lastSyncAt === null || !device.lastSyncCompleted
-                                ? 'Ausstehend'
-                                : `${device.pendingServerChanges} offen`}
-                          </Badge>
+                  {data.devices.map((device) => {
+                    const isConfirming = confirmDeviceId === device.deviceId;
+                    const shortId =
+                      device.deviceId.length > 8
+                        ? `${device.deviceId.slice(0, 8)}…`
+                        : device.deviceId;
+                    return (
+                      <li
+                        key={device.deviceId}
+                        className="space-y-1.5 rounded-lg border bg-background p-3 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                              <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
+                              {device.deviceName ?? 'Android-Gerät'}
+                            </span>
+                            <span
+                              title={`Geräte-ID: ${device.deviceId}`}
+                              className="font-mono text-[11px] text-muted-foreground"
+                            >
+                              ID: {shortId}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Badge
+                              className={
+                                device.sessionActive
+                                  ? 'bg-primary/15 text-primary'
+                                  : 'bg-muted text-muted-foreground'
+                              }
+                            >
+                              {device.sessionActive ? 'Aktiv' : 'Abgemeldet'}
+                            </Badge>
+                            <Badge
+                              className={
+                                device.isUpToDate
+                                  ? 'bg-success/15 text-success'
+                                  : 'bg-warning/15 text-warning'
+                              }
+                            >
+                              {device.isUpToDate
+                                ? 'Aktuell'
+                                : device.lastSyncAt === null || !device.lastSyncCompleted
+                                  ? 'Ausstehend'
+                                  : `${device.pendingServerChanges} offen`}
+                            </Badge>
+                            {!isConfirming && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="iconSm"
+                                title={
+                                  device.sessionActive
+                                    ? 'Sitzung beenden & Gerät entfernen'
+                                    : 'Gerät entfernen'
+                                }
+                                aria-label="Gerät entfernen"
+                                onClick={() => setConfirmDeviceId(device.deviceId)}
+                                disabled={removeDevice.isPending}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <p className="text-muted-foreground">
-                        Letzter Sync:{' '}
-                        {device.lastSyncAt ? formatDateTime(device.lastSyncAt) : 'Noch nie'} · ↑{' '}
-                        {device.lastPushedCount} gepusht / ↓ {device.lastPulledCount} gepullt
-                      </p>
-                      {device.clockSkewWarning && (
-                        <p className="text-warning">
-                          Hinweis: Abweichende Geräteuhr erkannt (Server-Zeitstempel-Schutz aktiv).
+                        <p className="text-muted-foreground">
+                          Letzter Sync:{' '}
+                          {device.lastSyncAt ? formatDateTime(device.lastSyncAt) : 'Noch nie'} · ↑{' '}
+                          {device.lastPushedCount} gepusht / ↓ {device.lastPulledCount} gepullt
                         </p>
-                      )}
-                    </li>
-                  ))}
+                        {device.clockSkewWarning && (
+                          <p className="text-warning">
+                            Hinweis: Abweichende Geräteuhr erkannt (Server-Zeitstempel-Schutz aktiv).
+                          </p>
+                        )}
+                        {isConfirming && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
+                            <span className="text-[11px] text-destructive">
+                              {device.sessionActive
+                                ? 'Sitzung beenden & Gerät aus der Sync-Liste entfernen?'
+                                : 'Gerät aus der Sync-Liste entfernen?'}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => setConfirmDeviceId(null)}
+                                disabled={removeDevice.isPending}
+                              >
+                                Abbrechen
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 px-2 text-xs"
+                                onClick={() =>
+                                  removeDevice.mutate(device.deviceId, {
+                                    onSettled: () => setConfirmDeviceId(null),
+                                  })
+                                }
+                                disabled={removeDevice.isPending}
+                              >
+                                {removeDevice.isPending && (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                )}
+                                Entfernen
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

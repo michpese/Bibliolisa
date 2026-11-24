@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SyncStatusResponse } from '@bibliolisa/shared';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/api/client';
@@ -142,4 +142,19 @@ export function useSyncStatus() {
     isManualSyncing,
     triggerManualSync,
   };
+}
+
+export function useRemoveSyncDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (deviceId: string) => api.removeSyncDevice(deviceId),
+    onSuccess: () => {
+      toast.success('Gerät aus der Synchronisation entfernt.');
+      void queryClient.invalidateQueries({ queryKey: syncKeys.status });
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: (error) => {
+      toast.error(errorMessage(error));
+    },
+  });
 }

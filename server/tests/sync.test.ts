@@ -966,4 +966,263 @@ describe('Delta-Sync (POST /api/sync), LWW-Konflikte, Pagination & Mandantentren
       dbCtx.checkpointAndClose();
     }
   });
+
+  it('ignoriert rotierte/widerrufene Alt-Sessions im Sync-Status und erlaubt das Entfernen von Geräten via DELETE /api/sync/devices/:deviceId', async () => {
+    let nowMs = Date.parse('2026-11-24T12:00:00.000Z');
+    const { app } = await buildApp({
+      env: BASE_ENV,
+      dbPath: ':memory:',
+      now: () => new Date(nowMs),
+      logger: false,
+    });
+
+    try {
+      // Ohne Auth -> 401
+      const unauthDel = await app.inject({
+        method: 'DELETE',
+        url: '/api/sync/devices/any-device',
+      });
+      expect(unauthDel.statusCode).toBe(401);
+
+      // Web-User registrieren
+      const regWeb = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'cleanupuser',
+          password: 'Password123!',
+          clientType: 'web',
+          deviceName: 'Firefox auf Windows',
+        },
+      });
+      expect(regWeb.statusCode).toBe(201);
+      const webToken = regWeb.json().accessToken as string;
+
+      // Altes Handy (v0.1.0) loggt ein und rotiert sein Refresh-Token
+      nowMs += 1000;
+      const oldDeviceId = 'old-phone-v010';
+      const loginOld = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: {
+          username: 'cleanupuser',
+          password: 'Password123!',
+          clientType: 'mobile',
+          deviceId: oldDeviceId,
+          deviceName: 'Bibliolisa Android',
+        },
+      });
+      expect(loginOld.statusCode).toBe(200);
+      const oldRefresh1 = loginOld.json().refreshToken as string;
+
+      nowMs += 1000;
+      const refreshOld = await app.inject({
+        method: 'POST',
+        url: '/api/auth/refresh',
+        payload: {
+          refreshToken: oldRefresh1,
+          clientType: 'mobile',
+        },
+      });
+      expect(refreshOld.statusCode).toBe(200);
+
+      // Während aktiver Rotation darf die alte (ersetzte) Refresh-Zeile keinen zweiten Eintrag erzeugen
+      const statusWithRotated = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(statusWithRotated.statusCode).toBe(200);
+      expect(statusWithRotated.json().devices).toHaveLength(1);
+      expect(statusWithRotated.json().status).toBe('never_synced');
+
+      // Alte Session über DELETE /api/auth/sessions/:id abmelden -> muss auch Vorgänger-Tokens bereinigen
+      const sessionsBefore = await app.inject({
+        method: 'GET',
+        url: '/api/auth/sessions',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      const oldSession = (
+        sessionsBefore.json().sessions as Array<{
+          id: string;
+          deviceId: string | null;
+        }>
+      ).find((s) => s.deviceId === oldDeviceId);
+      expect(oldSession).toBeDefined();
+
+      const revokeRes = await app.inject({
+        method: 'DELETE',
+        url: `/api/auth/sessions/${oldSession!.id}`,
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(revokeRes.statusCode).toBe(204);
+
+      const statusAfterRevoke = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(statusAfterRevoke.statusCode).toBe(200);
+      expect(statusAfterRevoke.json().status).toBe('no_mobile_device');
+      expect(statusAfterRevoke.json().devices).toEqual([]);
+
+      // Jetzt: Zwei aktive Handy-Sessions (neues Gerät synct, altes ungesynctes Gerät blockiert Gesamtstatus)
+      nowMs += 1000;
+      const staleDeviceId = 'stale-reinstall-phone';
+      const activeDeviceId = 'current-phone-v030';
+
+      const loginStale = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: {
+          username: 'cleanupuser',
+          password: 'Password123!',
+          clientType: 'mobile',
+          deviceId: staleDeviceId,
+          deviceName: 'Bibliolisa Android',
+        },
+      });
+      expect(loginStale.statusCode).toBe(200);
+
+      nowMs += 1000;
+      const loginActive = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: {
+          username: 'cleanupuser',
+          password: 'Password123!',
+          clientType: 'mobile',
+          deviceId: activeDeviceId,
+          deviceName: 'Bibliolisa Android',
+        },
+      });
+      expect(loginActive.statusCode).toBe(200);
+      const activeMobileToken = loginActive.json().accessToken as string;
+
+      nowMs += 1000;
+      const syncActive = await app.inject({
+        method: 'POST',
+        url: '/api/sync',
+        headers: { authorization: `Bearer ${activeMobileToken}` },
+        payload: {
+          deviceId: activeDeviceId,
+          deviceName: 'Bibliolisa Android',
+          cursor: null,
+          clientTime: new Date(nowMs).toISOString(),
+        },
+      });
+      expect(syncActive.statusCode).toBe(200);
+
+      const statusBlocked = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(statusBlocked.json().status).toBe('never_synced');
+      expect(statusBlocked.json().devices).toHaveLength(2);
+
+      // Verwaistes Gerät über DELETE /api/sync/devices/:deviceId entfernen -> Gesamtstatus wird sofort 'synced'
+      const delStale = await app.inject({
+        method: 'DELETE',
+        url: `/api/sync/devices/${encodeURIComponent(staleDeviceId)}`,
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(delStale.statusCode).toBe(204);
+
+      const statusNowSynced = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(statusNowSynced.json().status).toBe('synced');
+      expect(statusNowSynced.json().devices).toHaveLength(1);
+      expect(statusNowSynced.json().devices[0].deviceId).toBe(activeDeviceId);
+
+      // Auch in /api/auth/sessions ist das verwaiste Gerät verschwunden
+      const sessionsAfterDel = await app.inject({
+        method: 'GET',
+        url: '/api/auth/sessions',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(
+        (
+          sessionsAfterDel.json().sessions as Array<{ deviceId: string | null }>
+        ).some((s) => s.deviceId === staleDeviceId)
+      ).toBe(false);
+
+      // Multi-User-Isolation: User B kann User As Gerät nicht löschen (404)
+      nowMs += 1000;
+      const regOther = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'other_cleanup_user',
+          password: 'Password123!',
+          clientType: 'web',
+        },
+      });
+      const otherToken = regOther.json().accessToken as string;
+
+      const crossUserDel = await app.inject({
+        method: 'DELETE',
+        url: `/api/sync/devices/${encodeURIComponent(activeDeviceId)}`,
+        headers: { authorization: `Bearer ${otherToken}` },
+      });
+      expect(crossUserDel.statusCode).toBe(404);
+      expect(crossUserDel.json().error.code).toBe('SYNC_DEVICE_NOT_FOUND');
+
+      // Nicht existierendes Gerät -> 404
+      const missingDel = await app.inject({
+        method: 'DELETE',
+        url: '/api/sync/devices/does-not-exist',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(missingDel.statusCode).toBe(404);
+
+      // User A hat weiterhin sein aktives Gerät; abgemeldetes sync_devices-Gerät lässt sich danach ebenfalls löschen
+      const sessionsStillThere = await app.inject({
+        method: 'GET',
+        url: '/api/auth/sessions',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      const activeSession = (
+        sessionsStillThere.json().sessions as Array<{
+          id: string;
+          deviceId: string | null;
+        }>
+      ).find((s) => s.deviceId === activeDeviceId);
+      expect(activeSession).toBeDefined();
+
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/auth/sessions/${activeSession!.id}`,
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      // Abgemeldetes sync_devices-Gerät bleibt zunächst als sessionActive: false sichtbar und kann per DELETE entfernt werden
+      const statusLoggedOut = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(statusLoggedOut.json().status).toBe('no_mobile_device');
+      expect(statusLoggedOut.json().devices).toHaveLength(1);
+      expect(statusLoggedOut.json().devices[0].sessionActive).toBe(false);
+
+      const delHistorical = await app.inject({
+        method: 'DELETE',
+        url: `/api/sync/devices/${encodeURIComponent(activeDeviceId)}`,
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(delHistorical.statusCode).toBe(204);
+
+      const statusEmpty = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${webToken}` },
+      });
+      expect(statusEmpty.json().devices).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
 });

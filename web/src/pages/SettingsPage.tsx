@@ -21,7 +21,7 @@ import { WebSyncBadge, getWebSyncPresentation } from '@/components/WebSyncBadge'
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
 import { Badge, Card, Skeleton } from '@/components/ui/misc';
-import { syncKeys, useSyncStatus } from '@/hooks/useSyncStatus';
+import { syncKeys, useRemoveSyncDevice, useSyncStatus } from '@/hooks/useSyncStatus';
 import { formatDateTime } from '@/lib/format';
 import { useTheme, type ThemePreference } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -105,6 +105,7 @@ export function SettingsPage() {
 }
 
 function SyncStatusCard() {
+  const [confirmDeviceId, setConfirmDeviceId] = useState<string | null>(null);
   const {
     data,
     isLoading,
@@ -116,6 +117,7 @@ function SyncStatusCard() {
     isManualSyncing,
     triggerManualSync,
   } = useSyncStatus();
+  const removeDevice = useRemoveSyncDevice();
 
   const busy = isLoading || isFetching || isManualSyncing;
   const presentation = getWebSyncPresentation(data, {
@@ -182,54 +184,119 @@ function SyncStatusCard() {
                 </p>
               ) : (
                 <ul className="divide-y rounded-lg border">
-                  {data.devices.map((device) => (
-                    <li
-                      key={device.deviceId}
-                      className="flex flex-wrap items-center gap-3 p-3 text-sm"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                        <Smartphone className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="flex flex-wrap items-center gap-2 font-medium">
-                          <span>{device.deviceName ?? 'Android-Gerät'}</span>
-                          <Badge
-                            className={
-                              device.sessionActive
-                                ? 'bg-primary/15 text-primary'
-                                : 'bg-muted text-muted-foreground'
-                            }
-                          >
-                            {device.sessionActive ? 'Aktiv' : 'Abgemeldet'}
-                          </Badge>
-                          <Badge
-                            className={
-                              device.isUpToDate
-                                ? 'bg-success/15 text-success'
-                                : 'bg-warning/15 text-warning'
-                            }
-                          >
-                            {device.isUpToDate
-                              ? 'Aktuell'
-                              : device.lastSyncAt === null || !device.lastSyncCompleted
-                                ? 'Sync offen'
-                                : `${device.pendingServerChanges} ausstehend`}
-                          </Badge>
+                  {data.devices.map((device) => {
+                    const isConfirming = confirmDeviceId === device.deviceId;
+                    const shortId =
+                      device.deviceId.length > 8
+                        ? `${device.deviceId.slice(0, 8)}…`
+                        : device.deviceId;
+                    return (
+                      <li key={device.deviceId} className="space-y-2 p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                            <Smartphone className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex flex-wrap items-center gap-2 font-medium">
+                              <span>{device.deviceName ?? 'Android-Gerät'}</span>
+                              <span
+                                title={`Geräte-ID: ${device.deviceId}`}
+                                className="font-mono text-xs font-normal text-muted-foreground"
+                              >
+                                ID: {shortId}
+                              </span>
+                              <Badge
+                                className={
+                                  device.sessionActive
+                                    ? 'bg-primary/15 text-primary'
+                                    : 'bg-muted text-muted-foreground'
+                                }
+                              >
+                                {device.sessionActive ? 'Aktiv' : 'Abgemeldet'}
+                              </Badge>
+                              <Badge
+                                className={
+                                  device.isUpToDate
+                                    ? 'bg-success/15 text-success'
+                                    : 'bg-warning/15 text-warning'
+                                }
+                              >
+                                {device.isUpToDate
+                                  ? 'Aktuell'
+                                  : device.lastSyncAt === null || !device.lastSyncCompleted
+                                    ? 'Sync offen'
+                                    : `${device.pendingServerChanges} ausstehend`}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Letzter Sync:{' '}
+                              {device.lastSyncAt ? formatDateTime(device.lastSyncAt) : 'Noch nie'} ·
+                              Letzter Transfer: ↑ {device.lastPushedCount} gepusht / ↓{' '}
+                              {device.lastPulledCount} gepullt
+                            </p>
+                            {device.clockSkewWarning && (
+                              <p className="text-xs text-warning">
+                                Hinweis: Geräteuhr weicht vom Server ab (Zeitstempel-Schutz aktiv).
+                              </p>
+                            )}
+                          </div>
+                          {!isConfirming && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="iconSm"
+                              title={
+                                device.sessionActive
+                                  ? 'Sitzung beenden & Gerät entfernen'
+                                  : 'Gerät entfernen'
+                              }
+                              aria-label="Gerät entfernen"
+                              onClick={() => setConfirmDeviceId(device.deviceId)}
+                              disabled={removeDevice.isPending}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          Letzter Sync:{' '}
-                          {device.lastSyncAt ? formatDateTime(device.lastSyncAt) : 'Noch nie'} ·
-                          Letzter Transfer: ↑ {device.lastPushedCount} gepusht / ↓{' '}
-                          {device.lastPulledCount} gepullt
-                        </p>
-                        {device.clockSkewWarning && (
-                          <p className="text-xs text-warning">
-                            Hinweis: Geräteuhr weicht vom Server ab (Zeitstempel-Schutz aktiv).
-                          </p>
+                        {isConfirming && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs">
+                            <span className="text-destructive">
+                              {device.sessionActive
+                                ? 'Sitzung beenden und Gerät aus der Synchronisation entfernen?'
+                                : 'Gerät aus der Synchronisation entfernen?'}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setConfirmDeviceId(null)}
+                                disabled={removeDevice.isPending}
+                              >
+                                Abbrechen
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                  removeDevice.mutate(device.deviceId, {
+                                    onSettled: () => setConfirmDeviceId(null),
+                                  })
+                                }
+                                disabled={removeDevice.isPending}
+                              >
+                                {removeDevice.isPending && (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                )}
+                                Entfernen
+                              </Button>
+                            </div>
+                          </div>
                         )}
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

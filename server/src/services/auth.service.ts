@@ -876,29 +876,76 @@ export class AuthService {
   revokeSession(userId: string, sessionId: string): void {
     const nowIso = toCanonicalIsoUtc(this.now());
 
-    const target = this.dbCtx.db
-      .select()
-      .from(refreshTokens)
-      .where(
-        and(eq(refreshTokens.id, sessionId), eq(refreshTokens.userId, userId))
-      )
-      .get();
+    this.dbCtx.sqlite.transaction(() => {
+      const target = this.dbCtx.db
+        .select()
+        .from(refreshTokens)
+        .where(
+          and(eq(refreshTokens.id, sessionId), eq(refreshTokens.userId, userId))
+        )
+        .get();
 
-    if (!target) {
-      throw new AppError(404, 'SESSION_NOT_FOUND', 'Session nicht gefunden.');
-    }
+      if (!target) {
+        throw new AppError(404, 'SESSION_NOT_FOUND', 'Session nicht gefunden.');
+      }
 
-    if (target.revokedAt !== null) {
-      return;
-    }
+      if (target.revokedAt !== null) {
+        return;
+      }
 
-    this.dbCtx.db
-      .update(refreshTokens)
-      .set({ revokedAt: nowIso, graceUntil: null })
-      .where(
-        and(eq(refreshTokens.id, sessionId), eq(refreshTokens.userId, userId))
-      )
-      .run();
+      const idsToRevoke = new Set<string>();
+      const queue: string[] = [target.id];
+
+      while (queue.length > 0) {
+        const currentId = queue.pop()!;
+        if (idsToRevoke.has(currentId)) continue;
+        idsToRevoke.add(currentId);
+
+        const current = this.dbCtx.db
+          .select()
+          .from(refreshTokens)
+          .where(
+            and(
+              eq(refreshTokens.id, currentId),
+              eq(refreshTokens.userId, userId)
+            )
+          )
+          .get();
+        if (current?.replacedById && !idsToRevoke.has(current.replacedById)) {
+          queue.push(current.replacedById);
+        }
+
+        const predecessors = this.dbCtx.db
+          .select({ id: refreshTokens.id })
+          .from(refreshTokens)
+          .where(
+            and(
+              eq(refreshTokens.userId, userId),
+              eq(refreshTokens.replacedById, currentId)
+            )
+          )
+          .all();
+        for (const pred of predecessors) {
+          if (!idsToRevoke.has(pred.id)) {
+            queue.push(pred.id);
+          }
+        }
+      }
+
+      for (const id of idsToRevoke) {
+        this.dbCtx.db
+          .update(refreshTokens)
+          .set({ revokedAt: nowIso, graceUntil: null })
+          .where(
+            and(
+              eq(refreshTokens.id, id),
+              eq(refreshTokens.userId, userId),
+              isNull(refreshTokens.revokedAt)
+            )
+          )
+          .run();
+      }
+    })();
   }
 
   async changePassword(

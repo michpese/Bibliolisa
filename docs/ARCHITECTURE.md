@@ -882,6 +882,7 @@ Alle Fehlerantworten nutzen ein konsistentes JSON-Format (inkl. HTTP-Statuscodes
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/sync` | Ja | Führt atomaren Push + Pull in einer SQLite-Transaktion aus und aktualisiert den Geräte-Sync-Fortschritt in `sync_devices` (Details siehe Abschnitt 5). `200`. |
 | `GET` | `/api/sync/status` | Ja | Strikt nach `request.user.id` isolierter Gesamt-Sync-Status für die Webapp: `{ status, serverTime, totalBooks, deletedBooks, libraryLastModifiedAt, pendingForMobileCount, devices[] }`. `200`. |
+| `DELETE` | `/api/sync/devices/:deviceId` | Ja | Entfernt ein Mobilgerät aus `sync_devices` und widerruft ggf. zugehörige aktive Mobile-Refresh-Tokens inkl. Rotationskette strikt für `request.user.id`. `204` oder `404`. |
 
 #### Metadaten-Lookup
 

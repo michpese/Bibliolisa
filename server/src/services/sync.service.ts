@@ -819,6 +819,7 @@ export class SyncService {
          WHERE user_id = ?
            AND client_type = 'mobile'
            AND revoked_at IS NULL
+           AND replaced_by_id IS NULL
            AND expires_at > ?
          ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC`
       )
@@ -1047,6 +1048,84 @@ export class SyncService {
       pendingForMobileCount,
       devices,
     };
+  }
+
+  removeSyncDevice(userId: string, rawDeviceId: string): void {
+    const deviceId = rawDeviceId.trim();
+    if (!deviceId) {
+      throw new AppError(400, 'INVALID_DEVICE_ID', 'Ungültige Geräte-ID.');
+    }
+    const nowIso = toCanonicalIsoUtc(this.now());
+
+    this.dbCtx.sqlite.transaction(() => {
+      const deletedSync = this.dbCtx.sqlite
+        .prepare('DELETE FROM sync_devices WHERE user_id = ? AND device_id = ?')
+        .run(userId, deviceId);
+
+      const matchedTokens = this.dbCtx.sqlite
+        .prepare(
+          `SELECT id FROM refresh_tokens
+           WHERE user_id = ?
+             AND client_type = 'mobile'
+             AND revoked_at IS NULL
+             AND (device_id = ? OR (device_id IS NULL AND id = ?))`
+        )
+        .all(userId, deviceId, deviceId) as Array<{ id: string }>;
+
+      const idsToRevoke = new Set<string>();
+      const queue = matchedTokens.map((row) => row.id);
+      const selectPredecessorsStmt = this.dbCtx.sqlite.prepare(
+        `SELECT id FROM refresh_tokens
+         WHERE user_id = ? AND replaced_by_id = ? AND revoked_at IS NULL`
+      );
+      const selectSuccessorStmt = this.dbCtx.sqlite.prepare(
+        `SELECT replaced_by_id FROM refresh_tokens
+         WHERE user_id = ? AND id = ?`
+      );
+
+      while (queue.length > 0) {
+        const currentId = queue.pop()!;
+        if (idsToRevoke.has(currentId)) continue;
+        idsToRevoke.add(currentId);
+
+        const predecessors = selectPredecessorsStmt.all(
+          userId,
+          currentId
+        ) as Array<{ id: string }>;
+        for (const pred of predecessors) {
+          if (!idsToRevoke.has(pred.id)) {
+            queue.push(pred.id);
+          }
+        }
+
+        const succ = selectSuccessorStmt.get(userId, currentId) as
+          | { replaced_by_id: string | null }
+          | undefined;
+        if (succ?.replaced_by_id && !idsToRevoke.has(succ.replaced_by_id)) {
+          queue.push(succ.replaced_by_id);
+        }
+      }
+
+      let revokedCount = 0;
+      if (idsToRevoke.size > 0) {
+        const revokeStmt = this.dbCtx.sqlite.prepare(
+          `UPDATE refresh_tokens
+           SET revoked_at = ?, grace_until = NULL
+           WHERE user_id = ? AND id = ? AND revoked_at IS NULL`
+        );
+        for (const tokenId of idsToRevoke) {
+          revokedCount += revokeStmt.run(nowIso, userId, tokenId).changes;
+        }
+      }
+
+      if (deletedSync.changes === 0 && revokedCount === 0) {
+        throw new AppError(
+          404,
+          'SYNC_DEVICE_NOT_FOUND',
+          'Synchronisationsgerät nicht gefunden.'
+        );
+      }
+    })();
   }
 
   private loadUserBooksForUser(userId: string, ids: string[]): UserBook[] {

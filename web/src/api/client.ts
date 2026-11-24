@@ -304,6 +304,10 @@ export const api = {
   me: () => apiFetch<AuthUser>('/api/auth/me'),
   sessions: () => apiFetch<SessionsResponse>('/api/auth/sessions'),
   syncStatus: () => apiFetch<SyncStatusResponse>('/api/sync/status'),
+  removeSyncDevice: (deviceId: string) =>
+    apiFetch<void>(`/api/sync/devices/${encodeURIComponent(deviceId)}`, {
+      method: 'DELETE',
+    }),
   revokeSession: (id: string) =>
     apiFetch<void>(`/api/auth/sessions/${id}`, { method: 'DELETE' }),
   changePassword: (body: ChangePasswordRequest) =>
