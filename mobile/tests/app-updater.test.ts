@@ -349,6 +349,17 @@ describe('GitHub-Release-Parsing & Update-Check', () => {
     const changelogPath = path.resolve(__dirname, '..', '..', 'CHANGELOG.md');
     const changelogMd = fs.readFileSync(changelogPath, 'utf8');
 
+    const sec030 = extractChangelogSection(changelogMd, 'v0.3.0');
+    expect(sec030).toContain('### ✨ Highlights');
+    expect(sec030).toContain('Webapp-Sync-Anzeige');
+    expect(sec030).toContain('Noch ein Buch hinzufügen');
+    expect(sec030).not.toContain('## [0.2.1]');
+    expect(extractChangelogSection(changelogMd, '0.3.0')).toBe(sec030);
+
+    const blocks030 = formatReleaseNotesForDisplay(sec030);
+    expect(blocks030.some((block) => block.type === 'heading')).toBe(true);
+    expect(blocks030.some((block) => block.type === 'bullet')).toBe(true);
+
     const sec021 = extractChangelogSection(changelogMd, 'v0.2.1');
     expect(sec021).toContain('### ✨ Highlights');
     expect(sec021).toContain('Zuverlässige Reihenfolge bei Buchreihen-Empfehlungen');

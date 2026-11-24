@@ -61,7 +61,7 @@ Trage das Secret in `.env` ein und passe bei Bedarf die weiteren Variablen an:
 
 | Variable | Standard | Beschreibung |
 | :--- | :--- | :--- |
-| `BIBLIOLISA_IMAGE` | `ghcr.io/michpese/bibliolisa:latest` | Optionales Container-Image für `docker compose pull` (z. B. `:0.2.1` pinnen) |
+| `BIBLIOLISA_IMAGE` | `ghcr.io/michpese/bibliolisa:latest` | Optionales Container-Image für `docker compose pull` (z. B. `:0.3.0` pinnen) |
 | `JWT_SECRET` | *(Pflicht)* | Signierschlüssel für Access- und Media-Tokens (min. 32 Zeichen) |
 | `HOST_PORT` | `3000` | Host-Port, auf den Port `3000` des Containers gemappt wird (nie `80`/`443`) |
 | `HOST_BIND` | `0.0.0.0` | `0.0.0.0` für direkten LAN-Zugriff, `127.0.0.1` falls nur der lokale Host-Reverse-Proxy zugreifen darf |
@@ -102,7 +102,7 @@ Alternativ kann `./data:/data` in `docker-compose.yml` durch ein Named Volume (z
 docker compose pull && docker compose up -d
 ```
 
-Optional lässt sich in `.env` ein festes Release-Tag pinnen, z. B. `BIBLIOLISA_IMAGE=ghcr.io/michpese/bibliolisa:0.2.1`.
+Optional lässt sich in `.env` ein festes Release-Tag pinnen, z. B. `BIBLIOLISA_IMAGE=ghcr.io/michpese/bibliolisa:0.3.0`.
 
 **Variante 2 – Image lokal aus dem Quellcode bauen:**
 
@@ -122,7 +122,7 @@ Erwartete Antwort (`200 OK`):
 ```json
 {
   "status": "ok",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "serverTime": "...",
   "allowRegistration": true,
   "providers": {
@@ -373,7 +373,7 @@ Das Repository enthält zwei Workflows unter `.github/workflows/`:
   - `pull_request` auf `main` (führt Build + kompletten Container-Smoke-Test ohne Push aus)
   - `workflow_dispatch` (manuell mit Plattformwahl `linux/amd64,linux/arm64` oder `linux/amd64`)
 - **Ablauf:** Baut zuerst ein `linux/amd64`-Image und prüft es gegen [`scripts/docker-smoke-test.mjs`](scripts/docker-smoke-test.mjs); erst bei Erfolg wird das Multi-Arch-Image (`linux/amd64`, `linux/arm64`) nach `ghcr.io/michpese/bibliolisa` gepusht.
-- **Image-Tags:** `latest` (Standard-Branch), `main`, `<version>` & `<major>.<minor>` (bei SemVer-Tags wie `v0.2.1`), `sha-<commit>`.
+- **Image-Tags:** `latest` (Standard-Branch), `main`, `<version>` & `<major>.<minor>` (bei SemVer-Tags wie `v0.3.0`), `sha-<commit>`.
 - **Hinweis zur Sichtbarkeit:** Das erste automatisch angelegte GHCR-Package ist bei GitHub ggf. zunächst *private*. Soll `docker compose pull` ohne `docker login ghcr.io` funktionieren, unter **GitHub → Packages → bibliolisa → Package settings → Change visibility** auf *Public* umstellen (oder alternativ einmalig mit einem PAT `read:packages` einloggen).
 
 ### Android-APK als GitHub Release ([`.github/workflows/android-release.yml`](.github/workflows/android-release.yml))
@@ -402,6 +402,6 @@ Das Repository enthält zwei Workflows unter `.github/workflows/`:
 2. Einen SemVer-Tag setzen und pushen – er stößt beide Workflows gleichzeitig an:
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.3.0
+git push origin v0.3.0
 ```

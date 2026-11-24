@@ -21,7 +21,7 @@ export function resolveServerVersion(
     // Fallback auf Standardversion
   }
 
-  return '0.2.1';
+  return '0.3.0';
 }
 
 export const SERVER_VERSION = resolveServerVersion();

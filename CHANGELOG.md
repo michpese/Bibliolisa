@@ -6,6 +6,42 @@ Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1
 
 ---
 
+## [0.3.0] - 2026-11-24
+
+### ✨ Highlights
+
+- **Webapp-Sync-Anzeige & manueller Sync (#6):** Die Webapp zeigt auf der Startseite sofort ein klickbares Sync-Badge (*Synchron*, *Handy ausstehend*, *Handy nicht gesynct*, *Kein Handy*) und bietet in **Einstellungen → Synchronisation** einen eigenen *„Jetzt synchronisieren“*-Button samt gerätebezogenem Gesamtfeedback.
+- **Nahtloses Mehrfach-Erfassen in der Android-App (#2):** Nach dem Speichern eines Buches erscheint ein themengerechtes Bestätigungs-Popup mit der Primäroption **„Noch ein Buch hinzufügen“**, die Formular und Suche geleert lässt und sofort zum Seitenanfang scrollt.
+- **Umfassende UI-, Safe-Area- & Navigations-Fixes (#1, #3, #4, #5):** Verbesserte Edge-to-Edge-Abstände auf Android, vollständiger Filter-/Scroll-Erhalt in der Webapp beim Zurückkehren aus Buchdetails sowie aktiver Reload-Spinner bei Empfehlungen.
+
+### 🚀 Neue Funktionen
+
+- **Webapp Sync-Status (`shared`, `server`, `web`, `mobile`):**
+  - Neue SQLite-Tabelle `sync_devices` inklusive automatischer Drizzle-Migration `0001_sync_devices.sql` für bestehende Server-Datenbanken.
+  - Neuer authentifizierter, strikt nach `user_id` isolierter Endpunkt `GET /api/sync/status` mit Bibliotheksstand, ausstehenden Änderungen je Mobilgerät und letztem Transfer (`↑ gepusht / ↓ gepullt`).
+  - Klickbares `WebSyncBadge` im Header der Web-Bibliothek mit Detail-Dialog sowie automatischem Aktualisieren der Webapp-Listen, sobald ein externes Handy-Sync neue Änderungen auf den Server schreibt.
+  - Eigene `Synchronisation`-Karte in den Web-Einstellungen mit manuellem Sync-Button, Ladeanzeige, Inline-Statusrückmeldung und Hinweis auf reine Offline-Änderungen bis zum nächsten App-Sync.
+  - Optionales Feld `deviceName` in `SyncRequestSchema` für abwärtskompatible Gerätebenennung aus der Android-App.
+- **Android „Noch ein Buch hinzufügen“ (`mobile`):** Themengerechtes Bottom-Sheet-Modal in `AddBookScreen.tsx` nach dem Speichern mit den drei Aktionen *„Noch ein Buch hinzufügen“*, *„Details öffnen“* und *„Zur Bibliothek“*.
+
+### 🐛 Fehlerbehebungen
+
+- **Android System-Navigationsleiste (`#1`):** Einheitliches Safe-Area-Handling über `useBottomSafePadding()` für `BookDetailScreen`, `LibraryScreen`, `RecommendationsScreen`, `BarcodeScanner`, `SyncStatusBadge` und `UpdateModal`, sodass untere Aktionsbuttons bei 3-Tasten- oder Gestennavigation nicht mehr verdeckt werden.
+- **Webapp Filter-, Sortierungs- & Scroll-Erhalt (`#3`):** Beim Zurückkehren von der Buchdetailseite bleiben Suchbegriff, Status-Tab, Filter, Sortierung und Scroll-Position sowohl über den Zurück-Link als auch über die Browser-Historie erhalten.
+- **Android Sync-Badge-Überlauf (`#4`):** Verbessertes Header- und Einstellungs-Layout, damit `SyncStatusBadge` auch auf schmalen Displays nicht abgeschnitten wird.
+- **Android Empfehlungen-Reload (`#5`):** Aktiver Ladeindikator, optionaler Online-Sync, Pull-to-Refresh, neuer Seed und Zeitstempel-Feedback auch im Offline-Modus.
+
+### 📚 Dokumentation & Tests
+
+- **Architektur- & Roadmap-Abgleich (`docs/ARCHITECTURE.md`, `docs/ROADMAP.md`):** Tabelle `sync_devices` und Endpunkt `GET /api/sync/status` in `docs/ARCHITECTURE.md` dokumentiert.
+- **Automatisierte Tests (`server` & `mobile`):** Integrationstests in `server/tests/sync.test.ts` für `GET /api/sync/status`, `no_mobile_device`/`never_synced`/`synced`/`server_ahead`, Multi-User-Isolation und Drizzle-Migration sowie Changelog-Tests für `v0.3.0` in `mobile/tests/app-updater.test.ts`.
+
+### 💾 Hinweis zum Update
+
+Bestehende Server-Datenbanken (`/data/bibliolisa.sqlite`) migrieren beim Container-Start automatisch und verlustfrei über `0001_sync_devices.sql`. Bestehende Android-Installationen ab `v0.2.0` (mit demselben Release-Keystore) können das Update direkt über **Einstellungen → App-Updates** ohne Deinstallation einspielen; alle lokalen Bücher, Cover, Notizen, Bewertungen und Sync-Einstellungen bleiben vollständig erhalten.
+
+---
+
 ## [0.2.1] - 2026-11-22
 
 ### ✨ Highlights

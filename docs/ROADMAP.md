@@ -282,3 +282,12 @@ Verifikation (ausgeführt, grün):
 
 - **Kategorieübergreifender Reihenschutz (`shared`):** Einheitliche Reihen-Zulässigkeitsprüfung (`isSeriesEligibleForRecommendation`) in `shared/src/recommendations/engine.ts` für alle 5 Empfehlungskategorien (keine unbegonnenen Folgebände `> 1`, kein unsicherer `surprise_me`-Fallback, maximal ein nächster offener Band pro begonnener Reihe, keine übersprungenen ganzen Zwischenbände bei Beibehaltung von Dezimalbänden wie `1.5`, konsistente Behandlung von `abandoned`, `seriesNumber === null` und `seriesName`-Normalisierung).
 - **Tests, Doku & Release:** Erweiterte Testsuiten (`shared/tests/recommendations.test.ts`, `server/tests/recommendations.test.ts`, `mobile/tests/app-updater.test.ts`), aktualisiertes Kapitel 8 in `docs/ARCHITECTURE.md` sowie Release-Vorbereitung für `v0.2.1` (`versionCode 20199`) in `CHANGELOG.md` und allen Workspace-Manifesten.
+
+---
+
+## Nach-Phase-5: Web-Sync-Status, App-Enhancements & UI-Fixes (`v0.3.0`)
+
+- **Bugfixes (`#1`, `#3`, `#4`, `#5`):** Edge-to-Edge Safe-Area-Padding in Android-Screens & -Modals (`mobile/src/utils/safe-area.ts`), Filter-/Sortierungs-/Scroll-Erhalt beim Zurückkehren aus Buchdetails in der Webapp (`web/src/lib/libraryNavigation.ts`), umbruchsicheres `SyncStatusBadge`-Layout sowie aktiver Reload-Spinner und Offline-Feedback in `RecommendationsScreen.tsx`.
+- **Enhancement `#2` (Mobile):** Themengerechtes *„Buch gespeichert“*-Popup in `mobile/src/screens/AddBookScreen.tsx` mit Primäroption **„Noch ein Buch hinzufügen“** inkl. Rückkehr zum Seitenanfang.
+- **Enhancement `#6` (Shared / Server / Web / Mobile):** Geräte-Sync-Tracking in `sync_devices` (Drizzle-Migration `0001_sync_devices.sql`), authentifizierter & `user_id`-isolierter Endpunkt `GET /api/sync/status`, `WebSyncBadge` auf der Web-Bibliotheksseite und `Synchronisation`-Karte mit manuellem Sync-Button in `web/src/pages/SettingsPage.tsx`.
+- **Tests, Doku & Release:** Aktualisierte `docs/ARCHITECTURE.md`, Integrationstests in `server/tests/sync.test.ts`, Changelog-Tests in `mobile/tests/app-updater.test.ts` sowie Release-Vorbereitung für `v0.3.0` (`versionCode 30099`) in `CHANGELOG.md` und allen Workspace-Manifesten.
