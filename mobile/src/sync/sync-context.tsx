@@ -13,6 +13,7 @@ import { useAppContext } from '../context/AppContext';
 import {
   ensureFreshAccessToken,
   fetchBookCoverOnServer,
+  getMobileDeviceName,
   isAuthError,
   isNetworkError,
   MobileApiError,
@@ -104,6 +105,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
     return new SyncEngine({
       db,
+      deviceName: getMobileDeviceName(),
       checkHealth: checkServerHealth,
       ensureAccessToken: ensureFreshAccessToken,
       hasStoredTokens: async () => (await getAuthTokens()) !== null,

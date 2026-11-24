@@ -127,7 +127,34 @@ export const userBooks = sqliteTable(
   ]
 );
 
+export const syncDevices = sqliteTable(
+  'sync_devices',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    deviceId: text('device_id').notNull(),
+    deviceName: text('device_name'),
+    lastSyncAt: text('last_sync_at').notNull(),
+    lastSyncedServerUpdatedAt: text('last_synced_server_updated_at'),
+    lastSyncCompleted: integer('last_sync_completed').notNull().default(0),
+    lastPushedCount: integer('last_pushed_count').notNull().default(0),
+    lastPulledCount: integer('last_pulled_count').notNull().default(0),
+    clockSkewWarning: integer('clock_skew_warning').notNull().default(0),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_sync_devices_user_device').on(
+      table.userId,
+      table.deviceId
+    ),
+    index('idx_sync_devices_user_last_sync').on(table.userId, table.lastSyncAt),
+  ]
+);
+
 export type UserRow = typeof users.$inferSelect;
 export type RefreshTokenRow = typeof refreshTokens.$inferSelect;
 export type BookRow = typeof books.$inferSelect;
 export type UserBookRow = typeof userBooks.$inferSelect;
+export type SyncDeviceRow = typeof syncDevices.$inferSelect;

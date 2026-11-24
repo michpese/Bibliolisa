@@ -281,7 +281,7 @@ async function authenticatedRequest<T>(
   return parse(json);
 }
 
-function getMobileDeviceName(): string {
+export function getMobileDeviceName(): string {
   return Platform.OS === 'android' ? 'Bibliolisa Android' : `Bibliolisa ${Platform.OS}`;
 }
 

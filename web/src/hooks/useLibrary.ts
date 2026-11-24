@@ -20,6 +20,10 @@ export const libraryKeys = {
   recommendations: ['recommendations'] as const,
 };
 
+export const syncKeys = {
+  status: ['sync', 'status'] as const,
+};
+
 const PAGE_SIZE = 200;
 const MAX_PAGES = 25;
 
@@ -140,6 +144,7 @@ export function useUpdateEntry() {
     onSettled: () => {
       void client.invalidateQueries({ queryKey: libraryKeys.facets });
       void client.invalidateQueries({ queryKey: libraryKeys.recommendations });
+      void client.invalidateQueries({ queryKey: syncKeys.status });
     },
   });
 }
@@ -151,6 +156,7 @@ export function useDeleteEntry() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: libraryKeys.all });
       void client.invalidateQueries({ queryKey: libraryKeys.recommendations });
+      void client.invalidateQueries({ queryKey: syncKeys.status });
     },
   });
 }
@@ -162,6 +168,7 @@ export function useRestoreEntry() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: libraryKeys.all });
       void client.invalidateQueries({ queryKey: libraryKeys.recommendations });
+      void client.invalidateQueries({ queryKey: syncKeys.status });
     },
   });
 }
@@ -171,5 +178,6 @@ export function useInvalidateLibrary() {
   return () => {
     void client.invalidateQueries({ queryKey: libraryKeys.all });
     void client.invalidateQueries({ queryKey: libraryKeys.recommendations });
+    void client.invalidateQueries({ queryKey: syncKeys.status });
   };
 }

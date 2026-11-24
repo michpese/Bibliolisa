@@ -82,6 +82,7 @@ export interface CoverSyncAdapter {
 
 export interface SyncEngineDeps {
   db: SqlExecutor;
+  deviceName?: string | null;
   checkHealth?: typeof checkServerHealth;
   ensureAccessToken: (serverUrl: string) => Promise<string>;
   hasStoredTokens: () => Promise<boolean>;
@@ -649,6 +650,7 @@ export class SyncEngine {
 
         const payload: SyncRequest = {
           deviceId: session.deviceId,
+          ...(this.deps.deviceName ? { deviceName: this.deps.deviceName } : {}),
           cursor,
           clientTime: toCanonicalIsoUtc(this.nowFn()),
           limit: this.pageLimit,

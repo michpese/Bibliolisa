@@ -1,12 +1,27 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Laptop, Loader2, Monitor, Moon, Smartphone, Sun, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  Laptop,
+  Loader2,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Smartphone,
+  Sun,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
+import { WebSyncBadge, getWebSyncPresentation } from '@/components/WebSyncBadge';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
 import { Badge, Card, Skeleton } from '@/components/ui/misc';
+import { syncKeys, useSyncStatus } from '@/hooks/useSyncStatus';
 import { formatDateTime } from '@/lib/format';
 import { useTheme, type ThemePreference } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -20,12 +35,21 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; icon: typeof
 export function SettingsPage() {
   const { user } = useAuth();
   const { preference, setPreference } = useTheme();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.hash === '#sync') {
+      document.getElementById('sync')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [location.hash]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Einstellungen</h1>
-        <p className="text-sm text-muted-foreground">Konto, Darstellung und angemeldete Geräte.</p>
+        <p className="text-sm text-muted-foreground">
+          Konto, Darstellung, Synchronisation und angemeldete Geräte.
+        </p>
       </div>
 
       <Card className="space-y-3 p-5">
@@ -73,9 +97,197 @@ export function SettingsPage() {
         </div>
       </Card>
 
+      <SyncStatusCard />
       <SessionsCard />
       <PasswordCard />
     </div>
+  );
+}
+
+function SyncStatusCard() {
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isError,
+    error,
+    lastCheckedAt,
+    lastSyncFeedback,
+    isManualSyncing,
+    triggerManualSync,
+  } = useSyncStatus();
+
+  const busy = isLoading || isFetching || isManualSyncing;
+  const presentation = getWebSyncPresentation(data, {
+    isLoading,
+    isFetching: busy,
+    isError,
+    error,
+  });
+
+  return (
+    <Card id="sync" className="scroll-mt-20 space-y-4 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">Synchronisation</h2>
+          <p className="text-sm text-muted-foreground">
+            Bibliotheksabgleich zwischen Server, Webapp und verknüpften Mobilgeräten.
+          </p>
+        </div>
+        <WebSyncBadge hideSettingsLink />
+      </div>
+
+      {isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : isError ? (
+        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errorMessage(error)}
+        </p>
+      ) : (
+        data && (
+          <>
+            <dl className="grid gap-3 rounded-lg border bg-muted/30 p-3.5 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-muted-foreground">Aktive Bücher gesamt</dt>
+                <dd className="font-semibold tabular-nums">
+                  {data.totalBooks}
+                  {data.deletedBooks > 0 ? ` (${data.deletedBooks} im Papierkorb)` : ''}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Gesamtstatus</dt>
+                <dd className="font-medium">{presentation.title}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Letzte Server-Änderung</dt>
+                <dd className="font-medium">
+                  {data.libraryLastModifiedAt
+                    ? formatDateTime(data.libraryLastModifiedAt)
+                    : 'Noch keine Einträge'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Letzte Prüfung (Webapp)</dt>
+                <dd className="font-medium">{formatDateTime(lastCheckedAt)}</dd>
+              </div>
+            </dl>
+
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Geräte-Synchronisation
+              </h3>
+              {data.devices.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                  Aktuell ist kein Mobilgerät mit diesem Konto synchronisiert oder angemeldet.
+                </p>
+              ) : (
+                <ul className="divide-y rounded-lg border">
+                  {data.devices.map((device) => (
+                    <li
+                      key={device.deviceId}
+                      className="flex flex-wrap items-center gap-3 p-3 text-sm"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <Smartphone className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-2 font-medium">
+                          <span>{device.deviceName ?? 'Android-Gerät'}</span>
+                          <Badge
+                            className={
+                              device.sessionActive
+                                ? 'bg-primary/15 text-primary'
+                                : 'bg-muted text-muted-foreground'
+                            }
+                          >
+                            {device.sessionActive ? 'Aktiv' : 'Abgemeldet'}
+                          </Badge>
+                          <Badge
+                            className={
+                              device.isUpToDate
+                                ? 'bg-success/15 text-success'
+                                : 'bg-warning/15 text-warning'
+                            }
+                          >
+                            {device.isUpToDate
+                              ? 'Aktuell'
+                              : device.lastSyncAt === null || !device.lastSyncCompleted
+                                ? 'Sync offen'
+                                : `${device.pendingServerChanges} ausstehend`}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Letzter Sync:{' '}
+                          {device.lastSyncAt ? formatDateTime(device.lastSyncAt) : 'Noch nie'} ·
+                          Letzter Transfer: ↑ {device.lastPushedCount} gepusht / ↓{' '}
+                          {device.lastPulledCount} gepullt
+                        </p>
+                        {device.clockSkewWarning && (
+                          <p className="text-xs text-warning">
+                            Hinweis: Geräteuhr weicht vom Server ab (Zeitstempel-Schutz aktiv).
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                Reine Offline-Änderungen, die ausschließlich lokal auf einem gerade nicht verbundenen Handy liegen, erkennt der Server erst nach dem nächsten Sync der Android-App.
+              </p>
+            </div>
+          </>
+        )
+      )}
+
+      <div className="space-y-3 pt-1">
+        <div>
+          <Button onClick={() => void triggerManualSync()} disabled={busy}>
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Jetzt synchronisieren
+          </Button>
+        </div>
+
+        {lastSyncFeedback && (
+          <div
+            role="status"
+            className={cn(
+              'flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm',
+              lastSyncFeedback.tone === 'success' &&
+                'border-success/30 bg-success/10 text-success',
+              lastSyncFeedback.tone === 'warning' &&
+                'border-warning/30 bg-warning/10 text-warning',
+              lastSyncFeedback.tone === 'info' &&
+                'border-border bg-muted/60 text-foreground',
+              lastSyncFeedback.tone === 'error' &&
+                'border-destructive/30 bg-destructive/10 text-destructive'
+            )}
+          >
+            {lastSyncFeedback.tone === 'success' ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : lastSyncFeedback.tone === 'info' ? (
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <div className="space-y-0.5">
+              <p className="font-medium">{lastSyncFeedback.message}</p>
+              <p className="text-xs opacity-80">
+                Geprüft am {formatDateTime(lastSyncFeedback.checkedAt)}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -87,6 +299,7 @@ function SessionsCard() {
     onSuccess: () => {
       toast.success('Gerät abgemeldet.');
       void client.invalidateQueries({ queryKey: ['sessions'] });
+      void client.invalidateQueries({ queryKey: syncKeys.status });
     },
     onError: (error) => toast.error(errorMessage(error)),
   });
@@ -167,6 +380,7 @@ function PasswordCard() {
       setConfirm('');
       setError(null);
       void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      void queryClient.invalidateQueries({ queryKey: syncKeys.status });
     },
     onError: (err) => setError(errorMessage(err)),
   });

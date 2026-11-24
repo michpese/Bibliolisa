@@ -19,6 +19,7 @@ import type {
   SessionsResponse,
   SoftDeleteResponse,
   SortOrder,
+  SyncStatusResponse,
   UpdateLibraryEntry,
   HealthResponse,
 } from '@bibliolisa/shared';
@@ -302,6 +303,7 @@ export const api = {
 
   me: () => apiFetch<AuthUser>('/api/auth/me'),
   sessions: () => apiFetch<SessionsResponse>('/api/auth/sessions'),
+  syncStatus: () => apiFetch<SyncStatusResponse>('/api/sync/status'),
   revokeSession: (id: string) =>
     apiFetch<void>(`/api/auth/sessions/${id}`, { method: 'DELETE' }),
   changePassword: (body: ChangePasswordRequest) =>

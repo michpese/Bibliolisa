@@ -207,6 +207,7 @@ Bibliolisa/
 ```mermaid
 erDiagram
     users ||--o{ refresh_tokens : "besitzt"
+    users ||--o{ sync_devices : "synchronisiert Geräte"
     users ||--o{ user_books : "pflegt Index"
     users ||--o{ books : "erstellt (optional)"
     books ||--o{ user_books : "referenziert"
@@ -278,6 +279,20 @@ erDiagram
         TEXT updated_at "LWW UTC"
         TEXT server_updated_at "Monoton UTC"
         TEXT deleted_at "Soft Delete UTC"
+    }
+
+    sync_devices {
+        TEXT id PK "UUIDv4"
+        TEXT user_id FK
+        TEXT device_id
+        TEXT device_name
+        TEXT last_sync_at
+        TEXT last_synced_server_updated_at
+        INTEGER last_sync_completed "0 | 1"
+        INTEGER last_pushed_count
+        INTEGER last_pulled_count
+        INTEGER clock_skew_warning "0 | 1"
+        TEXT updated_at
     }
 ```
 
@@ -398,6 +413,24 @@ CREATE UNIQUE INDEX idx_user_books_active_unique
 CREATE INDEX idx_user_books_user_status ON user_books(user_id, status);
 CREATE INDEX idx_user_books_user_sync ON user_books(user_id, server_updated_at, id);
 CREATE INDEX idx_user_books_user_added ON user_books(user_id, added_at);
+
+-- 5. Geräte-Sync-Status (pro user_id + device_id für Web-Sync-Anzeige)
+CREATE TABLE sync_devices (
+    id TEXT PRIMARY KEY, -- UUIDv4
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    device_name TEXT,
+    last_sync_at TEXT NOT NULL,
+    last_synced_server_updated_at TEXT,
+    last_sync_completed INTEGER NOT NULL DEFAULT 0, -- 0/1
+    last_pushed_count INTEGER NOT NULL DEFAULT 0,
+    last_pulled_count INTEGER NOT NULL DEFAULT 0,
+    clock_skew_warning INTEGER NOT NULL DEFAULT 0, -- 0/1
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX idx_sync_devices_user_device ON sync_devices(user_id, device_id);
+CREATE INDEX idx_sync_devices_user_last_sync ON sync_devices(user_id, last_sync_at);
 ```
 
 > **Hinweis zur ISBN-Deduplizierung:** Bei Online-Anlage über `POST /api/library` prüft der Server optional anhand von `isbn_13` / `isbn_10`, ob ein passender Eintrag in `books` bereits existiert, und verknüpft bevorzugt die vorhandene `book_id`. Beim Offline-Sync hingegen darf kein `UNIQUE`-Constraint auf ISBNs den Push zweier offline erzeugter Datensätze abbrechen – daher sind `idx_books_isbn13` und `idx_books_isbn10` nicht-eindeutige Suchindizes.
@@ -627,6 +660,7 @@ Bibliolisa löst dies sauber durch zwei getrennte UTC-Zeitstempel:
 ```json
 {
   "deviceId": "8f21b9d4-3c1a-4b78-9d21-10a2f4b8e111",
+  "deviceName": "Bibliolisa Android",
   "cursor": "MjAyNi0xMS0yMFQxODowMDowMC4wMDBafDMxMWM4OWEwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMQ==",
   "clientTime": "2026-11-21T09:14:32.410Z",
   "limit": 100,
@@ -846,7 +880,8 @@ Alle Fehlerantworten nutzen ein konsistentes JSON-Format (inkl. HTTP-Statuscodes
 
 | Methode | Pfad | Auth | Beschreibung & Parameter / Antwort |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/sync` | Ja | Führt atomaren Push + Pull in einer SQLite-Transaktion aus (Details siehe Abschnitt 5). `200`. |
+| `POST` | `/api/sync` | Ja | Führt atomaren Push + Pull in einer SQLite-Transaktion aus und aktualisiert den Geräte-Sync-Fortschritt in `sync_devices` (Details siehe Abschnitt 5). `200`. |
+| `GET` | `/api/sync/status` | Ja | Strikt nach `request.user.id` isolierter Gesamt-Sync-Status für die Webapp: `{ status, serverTime, totalBooks, deletedBooks, libraryLastModifiedAt, pendingForMobileCount, devices[] }`. `200`. |
 
 #### Metadaten-Lookup
 

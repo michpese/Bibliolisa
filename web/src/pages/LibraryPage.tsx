@@ -24,6 +24,7 @@ import type { LibraryFilters } from '@/api/client';
 import { BookFormDialog } from '@/components/BookFormDialog';
 import { BookCard, BookRow } from '@/components/BookCard';
 import { SeriesCard } from '@/components/SeriesCard';
+import { WebSyncBadge } from '@/components/WebSyncBadge';
 import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/misc';
@@ -271,29 +272,32 @@ export function LibraryPage() {
               : 'Lade …'}
           </p>
         </div>
-        <div
-          className="inline-flex rounded-lg bg-muted p-0.5"
-          role="radiogroup"
-          aria-label="Ansicht"
-        >
-          {VIEW_OPTIONS.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={view === value}
-              onClick={() => setView(value)}
-              className={cn(
-                'inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors',
-                view === value
-                  ? 'bg-card text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              <span className="hidden sm:inline">{label}</span>
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <WebSyncBadge />
+          <div
+            className="inline-flex rounded-lg bg-muted p-0.5"
+            role="radiogroup"
+            aria-label="Ansicht"
+          >
+            {VIEW_OPTIONS.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={view === value}
+                onClick={() => setView(value)}
+                className={cn(
+                  'inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors',
+                  view === value
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

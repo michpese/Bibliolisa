@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
-import { SyncResponseSchema } from '@bibliolisa/shared';
+import {
+  SyncResponseSchema,
+  SyncStatusResponseSchema,
+} from '@bibliolisa/shared';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { createDatabase } from '../src/db/client.js';
 import { parseEnv } from '../src/config/env.js';
 
 const BASE_ENV = parseEnv({
@@ -685,6 +689,281 @@ describe('Delta-Sync (POST /api/sync), LWW-Konflikte, Pagination & Mandantentren
       expect(skewBody.pull.userBooks[0]?.updatedAt).toBe(expectedClamped);
     } finally {
       await app.close();
+    }
+  });
+
+  it('liefert über GET /api/sync/status einen authentifizierten, mandantenisolierten Gesamtstatus für Web & Mobile', async () => {
+    let nowMs = Date.parse('2026-11-24T10:00:00.000Z');
+    const { app } = await buildApp({
+      env: BASE_ENV,
+      dbPath: ':memory:',
+      now: () => new Date(nowMs),
+      logger: false,
+    });
+
+    try {
+      // 1. Ohne Auth -> 401
+      const unauth = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+      });
+      expect(unauth.statusCode).toBe(401);
+
+      // 2. User A registriert nur Web-Session -> no_mobile_device
+      const regWebA = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'webuserA',
+          password: 'Password123!',
+          clientType: 'web',
+          deviceName: 'Firefox auf Windows',
+        },
+      });
+      expect(regWebA.statusCode).toBe(201);
+      const tokenWebA = regWebA.json().accessToken as string;
+
+      const statusNoMobile = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      expect(statusNoMobile.statusCode).toBe(200);
+      const parsedNoMobile = SyncStatusResponseSchema.parse(
+        statusNoMobile.json()
+      );
+      expect(parsedNoMobile.status).toBe('no_mobile_device');
+      expect(parsedNoMobile.totalBooks).toBe(0);
+      expect(parsedNoMobile.deletedBooks).toBe(0);
+      expect(parsedNoMobile.pendingForMobileCount).toBe(0);
+      expect(parsedNoMobile.devices).toEqual([]);
+
+      // 3. Mobile-Session für User A anmelden (noch ohne POST /api/sync) -> never_synced
+      nowMs += 1000;
+      const mobileDeviceId = 'android-device-a';
+      const loginMobA = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: {
+          username: 'webuserA',
+          password: 'Password123!',
+          clientType: 'mobile',
+          deviceId: mobileDeviceId,
+          deviceName: 'Pixel 9',
+        },
+      });
+      expect(loginMobA.statusCode).toBe(200);
+      const tokenMobA = loginMobA.json().accessToken as string;
+
+      const statusNeverSynced = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      expect(statusNeverSynced.statusCode).toBe(200);
+      const parsedNeverSynced = SyncStatusResponseSchema.parse(
+        statusNeverSynced.json()
+      );
+      expect(parsedNeverSynced.status).toBe('never_synced');
+      expect(parsedNeverSynced.devices).toHaveLength(1);
+      expect(parsedNeverSynced.devices[0]).toMatchObject({
+        deviceId: mobileDeviceId,
+        deviceName: 'Pixel 9',
+        lastSyncAt: null,
+        lastSyncCompleted: false,
+        isUpToDate: false,
+        sessionActive: true,
+      });
+
+      // 4. Buch via Web-API anlegen und danach vollständigen Mobile-Sync ausführen -> synced
+      nowMs += 1000;
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/library',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+        payload: {
+          status: 'unread',
+          book: { title: 'Sync Status Buch', authors: ['Autor X'] },
+        },
+      });
+      expect(createRes.statusCode).toBe(201);
+      const createdUserBookId = createRes.json().id as string;
+
+      // Vor Mobile-Sync mit bereits angelegtem Buch weiterhin never_synced + pendingForMobileCount = 2 (book + user_book)
+      const statusBeforeFirstSync = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      const parsedBeforeFirstSync = SyncStatusResponseSchema.parse(
+        statusBeforeFirstSync.json()
+      );
+      expect(parsedBeforeFirstSync.status).toBe('never_synced');
+      expect(parsedBeforeFirstSync.totalBooks).toBe(1);
+      expect(parsedBeforeFirstSync.pendingForMobileCount).toBe(2);
+
+      // Unvollständiger paginated Sync (hasMore: true) hält lastSyncCompleted: false -> never_synced
+      nowMs += 1000;
+      const partialSync = await app.inject({
+        method: 'POST',
+        url: '/api/sync',
+        headers: { authorization: `Bearer ${tokenMobA}` },
+        payload: {
+          deviceId: mobileDeviceId,
+          deviceName: 'Pixel 9 Pro',
+          cursor: null,
+          clientTime: new Date(nowMs).toISOString(),
+          limit: 1,
+          changes: { books: [], userBooks: [] },
+        },
+      });
+      expect(partialSync.statusCode).toBe(200);
+      expect(partialSync.json().hasMore).toBe(true);
+
+      const statusAfterPartial = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      expect(statusAfterPartial.json().status).toBe('never_synced');
+      expect(statusAfterPartial.json().devices[0].lastSyncCompleted).toBe(false);
+      expect(statusAfterPartial.json().devices[0].deviceName).toBe('Pixel 9 Pro');
+
+      // Zweite Seite abschließen (hasMore: false) -> synced
+      nowMs += 1000;
+      const finalSync = await app.inject({
+        method: 'POST',
+        url: '/api/sync',
+        headers: { authorization: `Bearer ${tokenMobA}` },
+        payload: {
+          deviceId: mobileDeviceId,
+          cursor: partialSync.json().nextCursor,
+          clientTime: new Date(nowMs).toISOString(),
+          limit: 100,
+          changes: { books: [], userBooks: [] },
+        },
+      });
+      expect(finalSync.statusCode).toBe(200);
+      expect(finalSync.json().hasMore).toBe(false);
+
+      const statusSynced = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      const parsedSynced = SyncStatusResponseSchema.parse(statusSynced.json());
+      expect(parsedSynced.status).toBe('synced');
+      expect(parsedSynced.totalBooks).toBe(1);
+      expect(parsedSynced.pendingForMobileCount).toBe(0);
+      expect(parsedSynced.devices[0]).toMatchObject({
+        deviceId: mobileDeviceId,
+        deviceName: 'Pixel 9 Pro',
+        lastSyncCompleted: true,
+        isUpToDate: true,
+        pendingServerChanges: 0,
+        lastPulledCount: 2,
+        sessionActive: true,
+      });
+
+      // 5. Bearbeitung in der Webapp -> server_ahead mit präziser Zählung
+      nowMs += 1000;
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/library/${createdUserBookId}`,
+        headers: { authorization: `Bearer ${tokenWebA}` },
+        payload: { status: 'reading', rating: 5 },
+      });
+      expect(patchRes.statusCode).toBe(200);
+
+      const statusAhead = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      const parsedAhead = SyncStatusResponseSchema.parse(statusAhead.json());
+      expect(parsedAhead.status).toBe('server_ahead');
+      expect(parsedAhead.pendingForMobileCount).toBe(1);
+      expect(parsedAhead.devices[0]?.isUpToDate).toBe(false);
+      expect(parsedAhead.devices[0]?.pendingServerChanges).toBe(1);
+
+      // Erneuter Mobile-Sync -> zurück auf synced
+      nowMs += 1000;
+      const catchUpSync = await app.inject({
+        method: 'POST',
+        url: '/api/sync',
+        headers: { authorization: `Bearer ${tokenMobA}` },
+        payload: {
+          deviceId: mobileDeviceId,
+          cursor: finalSync.json().nextCursor,
+          clientTime: new Date(nowMs).toISOString(),
+        },
+      });
+      expect(catchUpSync.statusCode).toBe(200);
+      expect(catchUpSync.json().pull.userBooks).toHaveLength(1);
+
+      const statusRecovered = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenWebA}` },
+      });
+      const parsedRecovered = SyncStatusResponseSchema.parse(
+        statusRecovered.json()
+      );
+      expect(parsedRecovered.status).toBe('synced');
+      expect(parsedRecovered.pendingForMobileCount).toBe(0);
+
+      // 6. Strikte Multi-User-Isolation: User B sieht niemals Geräte oder Bücher von User A
+      nowMs += 1000;
+      const regUserB = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: {
+          username: 'userB_iso',
+          password: 'Password123!',
+          clientType: 'web',
+        },
+      });
+      const tokenB = regUserB.json().accessToken as string;
+      const statusB = await app.inject({
+        method: 'GET',
+        url: '/api/sync/status',
+        headers: { authorization: `Bearer ${tokenB}` },
+      });
+      expect(statusB.statusCode).toBe(200);
+      const parsedB = SyncStatusResponseSchema.parse(statusB.json());
+      expect(parsedB.status).toBe('no_mobile_device');
+      expect(parsedB.totalBooks).toBe(0);
+      expect(parsedB.libraryLastModifiedAt).toBeNull();
+      expect(parsedB.devices).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('migriert sync_devices automatisch über Drizzle-Migrationen auf einer bestehenden SQLite-Datenbank', () => {
+    const dbCtx = createDatabase({
+      dataDir: './tmp-sync-test',
+      dbPath: ':memory:',
+      autoMigrate: true,
+    });
+    try {
+      const table = dbCtx.sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_devices'"
+        )
+        .get() as { name: string } | undefined;
+      expect(table?.name).toBe('sync_devices');
+
+      const indexes = dbCtx.sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sync_devices'"
+        )
+        .all() as Array<{ name: string }>;
+      const indexNames = indexes.map((idx) => idx.name);
+      expect(indexNames).toContain('idx_sync_devices_user_device');
+      expect(indexNames).toContain('idx_sync_devices_user_last_sync');
+    } finally {
+      dbCtx.checkpointAndClose();
     }
   });
 });

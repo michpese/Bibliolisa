@@ -11,4 +11,9 @@ export function registerSyncRoutes(
     const result = syncService.sync(request.user.id, body);
     return reply.status(200).send(result);
   });
+
+  app.get('/api/sync/status', async (request, reply) => {
+    const status = syncService.getSyncStatus(request.user.id);
+    return reply.status(200).send(status);
+  });
 }

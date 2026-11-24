@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   isbn10ToIsbn13,
   isbn13ToIsbn10,
@@ -5,10 +6,13 @@ import {
   toCanonicalIsoUtc,
   UUIDv4Schema,
   type Book,
+  type SyncDeviceStatus,
   type SyncPushResultItem,
   type SyncRequest,
   type SyncResponse,
+  type SyncStatusResponse,
   type UserBook,
+  type WebSyncOverallStatus,
 } from '@bibliolisa/shared';
 import type { DatabaseContext } from '../db/client.js';
 import { AppError } from '../plugins/error-handler.js';
@@ -61,6 +65,26 @@ interface UserBookDbRow {
 interface SyncWatermark {
   serverUpdatedAt: string;
   id: string;
+}
+
+interface SyncDeviceDbRow {
+  id: string;
+  user_id: string;
+  device_id: string;
+  device_name: string | null;
+  last_sync_at: string;
+  last_synced_server_updated_at: string | null;
+  last_sync_completed: number;
+  last_pushed_count: number;
+  last_pulled_count: number;
+  clock_skew_warning: number;
+  updated_at: string;
+}
+
+interface ActiveMobileSessionRow {
+  id: string;
+  device_id: string | null;
+  device_name: string | null;
 }
 
 function parseJsonStringArray(raw: string): string[] {
@@ -608,9 +632,12 @@ export class SyncService {
         : pageCandidates;
 
       let nextCursor: string | null = request.cursor;
+      let lastSyncedServerUpdatedAt: string | null =
+        decodedCursor?.serverUpdatedAt ?? null;
       if (hasMore) {
         const last = pageItems[pageItems.length - 1]!;
         nextCursor = encodeSyncCursor(last.server_updated_at, last.id);
+        lastSyncedServerUpdatedAt = last.server_updated_at;
       } else {
         const lastPageItem = pageItems[pageItems.length - 1];
         const pageWatermark: SyncWatermark | null = lastPageItem
@@ -629,6 +656,9 @@ export class SyncService {
             finalWatermark.serverUpdatedAt,
             finalWatermark.id
           );
+          lastSyncedServerUpdatedAt = finalWatermark.serverUpdatedAt;
+        } else {
+          lastSyncedServerUpdatedAt = serverTimeIso;
         }
       }
 
@@ -660,6 +690,72 @@ export class SyncService {
         Array.from(bookIdsToLoad)
       );
 
+      const explicitDeviceName = request.deviceName?.trim() || null;
+      let resolvedDeviceName = explicitDeviceName;
+      if (!resolvedDeviceName) {
+        const existingSyncDevice = this.dbCtx.sqlite
+          .prepare(
+            'SELECT device_name FROM sync_devices WHERE user_id = ? AND device_id = ?'
+          )
+          .get(userId, request.deviceId) as
+          | { device_name: string | null }
+          | undefined;
+        resolvedDeviceName = existingSyncDevice?.device_name?.trim() || null;
+      }
+      if (!resolvedDeviceName) {
+        const sessionNameRow = this.dbCtx.sqlite
+          .prepare(
+            `SELECT device_name FROM refresh_tokens
+             WHERE user_id = ? AND device_id = ? AND device_name IS NOT NULL
+             ORDER BY COALESCE(last_used_at, created_at) DESC
+             LIMIT 1`
+          )
+          .get(userId, request.deviceId) as
+          | { device_name: string | null }
+          | undefined;
+        resolvedDeviceName = sessionNameRow?.device_name?.trim() || null;
+      }
+
+      const acceptedBooks = bookPushResults.filter(
+        (item) => item.status === 'accepted'
+      ).length;
+      const acceptedUserBooks = userBookPushResults.filter(
+        (item) => item.status === 'accepted'
+      ).length;
+      const lastPushedCount = acceptedBooks + acceptedUserBooks;
+      const lastPulledCount = pulledBooks.length + pulledUserBooks.length;
+
+      this.dbCtx.sqlite
+        .prepare(
+          `INSERT INTO sync_devices (
+            id, user_id, device_id, device_name,
+            last_sync_at, last_synced_server_updated_at, last_sync_completed,
+            last_pushed_count, last_pulled_count, clock_skew_warning, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(user_id, device_id) DO UPDATE SET
+            device_name = COALESCE(excluded.device_name, sync_devices.device_name),
+            last_sync_at = excluded.last_sync_at,
+            last_synced_server_updated_at = excluded.last_synced_server_updated_at,
+            last_sync_completed = excluded.last_sync_completed,
+            last_pushed_count = excluded.last_pushed_count,
+            last_pulled_count = excluded.last_pulled_count,
+            clock_skew_warning = excluded.clock_skew_warning,
+            updated_at = excluded.updated_at`
+        )
+        .run(
+          crypto.randomUUID(),
+          userId,
+          request.deviceId,
+          resolvedDeviceName,
+          serverTimeIso,
+          lastSyncedServerUpdatedAt,
+          hasMore ? 0 : 1,
+          lastPushedCount,
+          lastPulledCount,
+          clockSkewWarning ? 1 : 0,
+          serverTimeIso
+        );
+
       return {
         serverTime: serverTimeIso,
         nextCursor,
@@ -676,6 +772,281 @@ export class SyncService {
         },
       };
     })();
+  }
+
+  getSyncStatus(userId: string): SyncStatusResponse {
+    const serverTime = toCanonicalIsoUtc(this.now());
+
+    const userBooksSummary = this.dbCtx.sqlite
+      .prepare(
+        `SELECT
+           COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_count,
+           COALESCE(SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_count,
+           MAX(server_updated_at) AS max_server_updated_at
+         FROM user_books
+         WHERE user_id = ?`
+      )
+      .get(userId) as {
+      active_count: number;
+      deleted_count: number;
+      max_server_updated_at: string | null;
+    };
+
+    const booksSummary = this.dbCtx.sqlite
+      .prepare(
+        `SELECT MAX(b.server_updated_at) AS max_server_updated_at
+         FROM books b
+         WHERE EXISTS (
+           SELECT 1 FROM user_books ub
+           WHERE ub.user_id = ? AND ub.book_id = b.id
+         )`
+      )
+      .get(userId) as { max_server_updated_at: string | null };
+
+    const maxUbTs = userBooksSummary.max_server_updated_at;
+    const maxBookTs = booksSummary.max_server_updated_at;
+    const libraryLastModifiedAt =
+      maxUbTs && maxBookTs
+        ? maxUbTs >= maxBookTs
+          ? maxUbTs
+          : maxBookTs
+        : (maxUbTs ?? maxBookTs ?? null);
+
+    const activeSessions = this.dbCtx.sqlite
+      .prepare(
+        `SELECT id, device_id, device_name
+         FROM refresh_tokens
+         WHERE user_id = ?
+           AND client_type = 'mobile'
+           AND revoked_at IS NULL
+           AND expires_at > ?
+         ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC`
+      )
+      .all(userId, serverTime) as ActiveMobileSessionRow[];
+
+    const storedDevices = this.dbCtx.sqlite
+      .prepare(
+        `SELECT * FROM sync_devices
+         WHERE user_id = ?
+         ORDER BY last_sync_at DESC, device_id ASC`
+      )
+      .all(userId) as SyncDeviceDbRow[];
+
+    const activeSessionsByDeviceId = new Map<
+      string,
+      { deviceName: string | null }
+    >();
+    const anonymousSessions: ActiveMobileSessionRow[] = [];
+
+    for (const session of activeSessions) {
+      const normalizedDeviceId = session.device_id?.trim();
+      const normalizedName = session.device_name?.trim() || null;
+      if (normalizedDeviceId) {
+        const existing = activeSessionsByDeviceId.get(normalizedDeviceId);
+        if (!existing) {
+          activeSessionsByDeviceId.set(normalizedDeviceId, {
+            deviceName: normalizedName,
+          });
+        } else if (!existing.deviceName && normalizedName) {
+          existing.deviceName = normalizedName;
+        }
+      } else {
+        anonymousSessions.push(session);
+      }
+    }
+
+    const storedByDeviceId = new Map<string, SyncDeviceDbRow>();
+    for (const row of storedDevices) {
+      storedByDeviceId.set(row.device_id, row);
+    }
+
+    const countPendingChangesSince = (sinceTs: string | null): number => {
+      if (sinceTs === null) {
+        const row = this.dbCtx.sqlite
+          .prepare(
+            `SELECT
+               (SELECT COUNT(*) FROM user_books WHERE user_id = ?) +
+               (SELECT COUNT(*) FROM books b WHERE EXISTS (
+                 SELECT 1 FROM user_books ub WHERE ub.user_id = ? AND ub.book_id = b.id
+               )) AS cnt`
+          )
+          .get(userId, userId) as { cnt: number };
+        return row.cnt;
+      }
+
+      const row = this.dbCtx.sqlite
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM user_books WHERE user_id = ? AND server_updated_at > ?) +
+             (SELECT COUNT(*) FROM books b WHERE EXISTS (
+               SELECT 1 FROM user_books ub WHERE ub.user_id = ? AND ub.book_id = b.id
+             ) AND b.server_updated_at > ?) AS cnt`
+        )
+        .get(userId, sinceTs, userId, sinceTs) as { cnt: number };
+      return row.cnt;
+    };
+
+    const buildDeviceStatus = (params: {
+      deviceId: string;
+      deviceName: string | null;
+      lastSyncAt: string | null;
+      lastSyncedServerUpdatedAt: string | null;
+      lastSyncCompleted: boolean;
+      lastPushedCount: number;
+      lastPulledCount: number;
+      clockSkewWarning: boolean;
+      sessionActive: boolean;
+    }): SyncDeviceStatus => {
+      const pendingServerChanges = countPendingChangesSince(
+        params.lastSyncedServerUpdatedAt
+      );
+      const isUpToDate =
+        params.lastSyncCompleted &&
+        params.lastSyncAt !== null &&
+        pendingServerChanges === 0 &&
+        (libraryLastModifiedAt === null ||
+          (params.lastSyncedServerUpdatedAt !== null &&
+            params.lastSyncedServerUpdatedAt >= libraryLastModifiedAt));
+
+      return {
+        deviceId: params.deviceId,
+        deviceName: params.deviceName,
+        lastSyncAt: params.lastSyncAt,
+        lastSyncCompleted: params.lastSyncCompleted,
+        isUpToDate,
+        pendingServerChanges,
+        lastPushedCount: params.lastPushedCount,
+        lastPulledCount: params.lastPulledCount,
+        clockSkewWarning: params.clockSkewWarning,
+        sessionActive: params.sessionActive,
+      };
+    };
+
+    const devices: SyncDeviceStatus[] = [];
+    const handledStoredIds = new Set<string>();
+
+    for (const [deviceId, sessionMeta] of activeSessionsByDeviceId.entries()) {
+      const stored = storedByDeviceId.get(deviceId);
+      if (stored) {
+        handledStoredIds.add(deviceId);
+        devices.push(
+          buildDeviceStatus({
+            deviceId,
+            deviceName: stored.device_name ?? sessionMeta.deviceName,
+            lastSyncAt: stored.last_sync_at,
+            lastSyncedServerUpdatedAt: stored.last_synced_server_updated_at,
+            lastSyncCompleted: stored.last_sync_completed === 1,
+            lastPushedCount: stored.last_pushed_count,
+            lastPulledCount: stored.last_pulled_count,
+            clockSkewWarning: stored.clock_skew_warning === 1,
+            sessionActive: true,
+          })
+        );
+      } else {
+        devices.push(
+          buildDeviceStatus({
+            deviceId,
+            deviceName: sessionMeta.deviceName,
+            lastSyncAt: null,
+            lastSyncedServerUpdatedAt: null,
+            lastSyncCompleted: false,
+            lastPushedCount: 0,
+            lastPulledCount: 0,
+            clockSkewWarning: false,
+            sessionActive: true,
+          })
+        );
+      }
+    }
+
+    // Legacy mobile sessions without device_id:
+    let anonymousFallbackClaimedId: string | null = null;
+    if (anonymousSessions.length > 0) {
+      if (
+        activeSessionsByDeviceId.size === 0 &&
+        storedDevices.length > 0
+      ) {
+        anonymousFallbackClaimedId = storedDevices[0]!.device_id;
+      } else if (storedDevices.length === 0) {
+        for (const anon of anonymousSessions) {
+          devices.push(
+            buildDeviceStatus({
+              deviceId: anon.id,
+              deviceName: anon.device_name?.trim() || null,
+              lastSyncAt: null,
+              lastSyncedServerUpdatedAt: null,
+              lastSyncCompleted: false,
+              lastPushedCount: 0,
+              lastPulledCount: 0,
+              clockSkewWarning: false,
+              sessionActive: true,
+            })
+          );
+        }
+      }
+    }
+
+    for (const stored of storedDevices) {
+      if (handledStoredIds.has(stored.device_id)) continue;
+      const claimedByAnonymous = anonymousFallbackClaimedId === stored.device_id;
+      devices.push(
+        buildDeviceStatus({
+          deviceId: stored.device_id,
+          deviceName: stored.device_name,
+          lastSyncAt: stored.last_sync_at,
+          lastSyncedServerUpdatedAt: stored.last_synced_server_updated_at,
+          lastSyncCompleted: stored.last_sync_completed === 1,
+          lastPushedCount: stored.last_pushed_count,
+          lastPulledCount: stored.last_pulled_count,
+          clockSkewWarning: stored.clock_skew_warning === 1,
+          sessionActive: claimedByAnonymous,
+        })
+      );
+    }
+
+    devices.sort((a, b) => {
+      if (a.sessionActive !== b.sessionActive) {
+        return a.sessionActive ? -1 : 1;
+      }
+      if (a.lastSyncAt !== b.lastSyncAt) {
+        if (!a.lastSyncAt) return 1;
+        if (!b.lastSyncAt) return -1;
+        return a.lastSyncAt > b.lastSyncAt ? -1 : 1;
+      }
+      return a.deviceId.localeCompare(b.deviceId);
+    });
+
+    const activeDevices = devices.filter((d) => d.sessionActive);
+    let status: WebSyncOverallStatus;
+    let pendingForMobileCount = 0;
+
+    if (activeDevices.length === 0) {
+      status = 'no_mobile_device';
+    } else {
+      pendingForMobileCount = Math.max(
+        0,
+        ...activeDevices.map((d) => d.pendingServerChanges)
+      );
+      if (activeDevices.every((d) => d.isUpToDate)) {
+        status = 'synced';
+      } else if (
+        activeDevices.some((d) => d.lastSyncAt === null || !d.lastSyncCompleted)
+      ) {
+        status = 'never_synced';
+      } else {
+        status = 'server_ahead';
+      }
+    }
+
+    return {
+      status,
+      serverTime,
+      totalBooks: userBooksSummary.active_count,
+      deletedBooks: userBooksSummary.deleted_count,
+      libraryLastModifiedAt,
+      pendingForMobileCount,
+      devices,
+    };
   }
 
   private loadUserBooksForUser(userId: string, ids: string[]): UserBook[] {

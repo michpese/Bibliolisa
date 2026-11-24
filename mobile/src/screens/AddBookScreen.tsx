@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -55,6 +55,7 @@ import {
   PROVIDER_LABELS,
   statusTransitionPatch,
 } from '../utils/format';
+import { useBottomSafePadding } from '../utils/safe-area';
 import { generateUuid } from '../utils/uuid';
 
 type AddBookNavProp = CompositeNavigationProp<
@@ -78,6 +79,8 @@ const PROVIDER_STATUS_TEXT: Record<ProviderStatus['status'], string> = {
 export function AddBookScreen() {
   const theme = useAppTheme();
   const navigation = useNavigation<AddBookNavProp>();
+  const sheetBottomPadding = useBottomSafePadding(12);
+  const scrollViewRef = useRef<ScrollView>(null);
   const {
     db,
     userId,
@@ -87,6 +90,7 @@ export function AddBookScreen() {
   } = useAppContext();
 
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [savedEntry, setSavedEntry] = useState<{ id: string; title: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [lookupBanner, setLookupBanner] = useState<{
@@ -299,27 +303,34 @@ export function AddBookScreen() {
       setSearchQuery('');
       setResults(null);
       setProviderStatuses([]);
+      setProviderFilter('all');
       setLookupBanner(null);
       setExistingMatch(null);
-
-      Alert.alert(
-        'Buch gespeichert',
-        `„${created.book.title}“ wurde lokal in deiner Bibliothek gespeichert.`,
-        [
-          {
-            text: 'Details öffnen',
-            onPress: () =>
-              navigation.navigate('BookDetail', { userBookId: created.id }),
-          },
-          {
-            text: 'Zur Bibliothek',
-            onPress: () => navigation.navigate('LibraryTab'),
-          },
-        ]
-      );
+      setSavedEntry({ id: created.id, title: created.book.title });
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleAddAnotherBook = () => {
+    setSavedEntry(null);
+    setProviderFilter('all');
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    });
+  };
+
+  const handleOpenSavedDetails = () => {
+    const entryId = savedEntry?.id;
+    setSavedEntry(null);
+    if (entryId) {
+      navigation.navigate('BookDetail', { userBookId: entryId });
+    }
+  };
+
+  const handleGoToLibrary = () => {
+    setSavedEntry(null);
+    navigation.navigate('LibraryTab');
   };
 
   const visibleResults = (results ?? []).filter(
@@ -339,6 +350,7 @@ export function AddBookScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
@@ -638,6 +650,132 @@ export function AddBookScreen() {
         onClose={() => setScannerOpen(false)}
         onScan={handleBarcodeScanned}
       />
+
+      <Modal
+        visible={savedEntry !== null}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        navigationBarTranslucent
+        onRequestClose={handleAddAnotherBook}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={handleAddAnotherBook}>
+          <Pressable
+            style={[
+              styles.savedSheet,
+              {
+                backgroundColor: theme.card,
+                borderColor: theme.border,
+                paddingBottom: sheetBottomPadding,
+              },
+            ]}
+            onPress={() => undefined}
+          >
+            <View style={styles.savedHeader}>
+              <View
+                style={[
+                  styles.savedIconBadge,
+                  { backgroundColor: theme.successSoft },
+                ]}
+              >
+                <Ionicons
+                  name="checkmark-circle"
+                  size={24}
+                  color={theme.success}
+                />
+              </View>
+              <Text style={[styles.savedTitle, { color: theme.text }]}>
+                Buch gespeichert
+              </Text>
+              <Pressable
+                onPress={handleAddAnotherBook}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Popup schließen"
+              >
+                <Ionicons name="close" size={22} color={theme.textMuted} />
+              </Pressable>
+            </View>
+
+            {savedEntry && (
+              <View style={styles.savedBody}>
+                <Text style={[styles.savedMessage, { color: theme.text }]}>
+                  „{savedEntry.title}“ wurde lokal in deiner Bibliothek gespeichert.
+                </Text>
+                <Text style={[styles.savedSubtext, { color: theme.textMuted }]}>
+                  {serverUrl && isAuthenticated
+                    ? 'Die Änderung ist für die Synchronisation mit deinem Server vorgemerkt.'
+                    : 'Das Buch ist sofort offline in deiner Bibliothek verfügbar.'}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.savedActions}>
+              <Pressable
+                onPress={handleAddAnotherBook}
+                style={({ pressed }) => [
+                  styles.savedPrimaryBtn,
+                  {
+                    backgroundColor: theme.primary,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="add-circle-outline"
+                  size={19}
+                  color={theme.primaryText}
+                />
+                <Text
+                  style={[
+                    styles.savedPrimaryBtnText,
+                    { color: theme.primaryText },
+                  ]}
+                >
+                  Noch ein Buch hinzufügen
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleOpenSavedDetails}
+                style={({ pressed }) => [
+                  styles.savedSecondaryBtn,
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+              >
+                <Ionicons name="book-outline" size={18} color={theme.text} />
+                <Text style={[styles.savedSecondaryBtnText, { color: theme.text }]}>
+                  Details öffnen
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleGoToLibrary}
+                style={({ pressed }) => [
+                  styles.savedSecondaryBtn,
+                  {
+                    backgroundColor: theme.background,
+                    borderColor: theme.border,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+                accessibilityRole="button"
+              >
+                <Ionicons name="library-outline" size={18} color={theme.text} />
+                <Text style={[styles.savedSecondaryBtnText, { color: theme.text }]}>
+                  Zur Bibliothek
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -762,5 +900,78 @@ const styles = StyleSheet.create({
   manualTitle: {
     fontSize: 17,
     fontWeight: '700',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  savedSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    gap: 14,
+  },
+  savedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  savedIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savedTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  savedBody: {
+    gap: 4,
+  },
+  savedMessage: {
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  savedSubtext: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  savedActions: {
+    gap: 8,
+    marginTop: 2,
+  },
+  savedPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+  },
+  savedPrimaryBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  savedSecondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  savedSecondaryBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
