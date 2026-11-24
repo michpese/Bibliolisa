@@ -12,7 +12,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,6 +41,7 @@ import {
   STATUS_ORDER,
   statusTransitionPatch,
 } from '../utils/format';
+import { useBottomSafePadding, useSafeAreaInsets } from '../utils/safe-area';
 
 type DetailRouteProp = RouteProp<RootStackParamList, 'BookDetail'>;
 type DetailNavProp = NativeStackNavigationProp<RootStackParamList, 'BookDetail'>;
@@ -77,6 +77,8 @@ function toEditFormValues(entry: LocalLibraryEntry): BookFormValues {
 
 export function BookDetailScreen() {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const bottomSafePadding = useBottomSafePadding(24);
   const route = useRoute<DetailRouteProp>();
   const navigation = useNavigation<DetailNavProp>();
   const { db, userId, libraryVersion, notifyDataChanged } = useAppContext();
@@ -238,15 +240,16 @@ export function BookDetailScreen() {
   const notesChanged = (notesDraft.trim() || null) !== (entry.notes ?? null);
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: theme.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
+    <>
+      <KeyboardAvoidingView
+        style={[styles.container, { backgroundColor: theme.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomSafePadding }]}
+          keyboardShouldPersistTaps="handled"
+        >
       {/* Buch-Header */}
       <View
         style={[
@@ -497,15 +500,22 @@ export function BookDetailScreen() {
           </Text>
         </Pressable>
       </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Bearbeiten-Modal */}
       <Modal
         visible={editModalVisible}
         animationType="slide"
+        statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={() => setEditModalVisible(false)}
       >
-        <SafeAreaView
-          style={[styles.modalContainer, { backgroundColor: theme.background }]}
+        <View
+          style={[
+            styles.modalContainer,
+            { backgroundColor: theme.background, paddingTop: insets.top },
+          ]}
         >
           <View
             style={[
@@ -525,7 +535,10 @@ export function BookDetailScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
             <ScrollView
-              contentContainerStyle={styles.modalScroll}
+              contentContainerStyle={[
+                styles.modalScroll,
+                { paddingBottom: bottomSafePadding },
+              ]}
               keyboardShouldPersistTaps="handled"
             >
               <BookForm
@@ -538,10 +551,9 @@ export function BookDetailScreen() {
               />
             </ScrollView>
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
       </Modal>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </>
   );
 }
 

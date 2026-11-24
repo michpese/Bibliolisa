@@ -7,7 +7,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   CameraView,
   useCameraPermissions,
@@ -16,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { normalizeIsbn, type NormalizedIsbn } from '@bibliolisa/shared';
 import { useAppTheme } from '../theme';
+import { useSafeAreaInsets } from '../utils/safe-area';
 
 interface BarcodeScannerProps {
   visible: boolean;
@@ -32,6 +32,8 @@ export function BarcodeScanner({
   onScan,
 }: BarcodeScannerProps) {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 16);
   const [permission, requestPermission] = useCameraPermissions();
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -71,14 +73,16 @@ export function BarcodeScanner({
       visible={visible}
       animationType="slide"
       presentationStyle="fullScreen"
+      statusBarTranslucent
+      navigationBarTranslucent
       onRequestClose={handleClose}
       onShow={() => {
         lockRef.current = false;
         setHint(null);
       }}
     >
-      <SafeAreaView style={[styles.container, { backgroundColor: '#000000' }]}>
-        <View style={styles.header}>
+      <View style={[styles.container, { backgroundColor: '#000000' }]}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <Pressable
             onPress={handleClose}
             style={styles.headerButton}
@@ -104,11 +108,21 @@ export function BarcodeScanner({
         </View>
 
         {!permission ? (
-          <View style={styles.permissionBox}>
+          <View
+            style={[
+              styles.permissionBox,
+              { paddingBottom: bottomInset + 16 },
+            ]}
+          >
             <Text style={styles.permissionText}>Kamerastatus wird geprüft…</Text>
           </View>
         ) : !permission.granted ? (
-          <View style={styles.permissionBox}>
+          <View
+            style={[
+              styles.permissionBox,
+              { paddingBottom: bottomInset + 16 },
+            ]}
+          >
             <Ionicons name="camera-outline" size={48} color="#c7d2fe" />
             <Text style={styles.permissionTitle}>Kamerazugriff erforderlich</Text>
             <Text style={styles.permissionText}>
@@ -144,7 +158,10 @@ export function BarcodeScanner({
               }}
               onBarcodeScanned={handleBarcodeScanned}
             />
-            <View style={styles.overlay} pointerEvents="none">
+            <View
+              style={[styles.overlay, { paddingBottom: bottomInset }]}
+              pointerEvents="none"
+            >
               <View style={styles.scanFrame} />
               <Text style={styles.instruction}>
                 Halte den ISBN-Barcode (EAN-13) ruhig in den Rahmen
@@ -157,7 +174,7 @@ export function BarcodeScanner({
             </View>
           </View>
         )}
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

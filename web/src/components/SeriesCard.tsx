@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { BookCheck, BookDashed, BookMarked, BookX, Play } from 'lucide-react';
 import { toast } from 'sonner';
 import type { LibraryEntry, ReadingStatus } from '@bibliolisa/shared';
@@ -13,6 +13,7 @@ import {
   STATUS_STYLES,
   formatSeriesNumber,
 } from '@/lib/format';
+import type { LibraryNavigationState } from '@/lib/libraryNavigation';
 import type { SeriesGroup } from '@/lib/series';
 import { cn } from '@/lib/utils';
 
@@ -31,7 +32,21 @@ const NEXT_STATUS: Record<ReadingStatus, ReadingStatus> = {
   abandoned: 'unread',
 };
 
+function getLibraryLinkState(
+  location: ReturnType<typeof useLocation>
+): LibraryNavigationState | undefined {
+  if (location.pathname === '/') {
+    return { fromLibrary: `${location.pathname}${location.search}` };
+  }
+  const currentState = location.state as LibraryNavigationState | null;
+  if (currentState?.fromLibrary) {
+    return { fromLibrary: currentState.fromLibrary };
+  }
+  return undefined;
+}
+
 function VolumeTile({ entry }: { entry: LibraryEntry }) {
+  const linkState = getLibraryLinkState(useLocation());
   const update = useUpdateEntry();
   const Icon = STATUS_ICONS[entry.status];
   const next = NEXT_STATUS[entry.status];
@@ -41,6 +56,7 @@ function VolumeTile({ entry }: { entry: LibraryEntry }) {
     <div className="flex w-[84px] shrink-0 flex-col gap-1.5">
       <Link
         to={`/books/${entry.id}`}
+        state={linkState}
         title={entry.book.title}
         className={cn(
           'relative block rounded-md ring-2 ring-offset-2 ring-offset-card transition-shadow hover:shadow-md',
@@ -81,6 +97,7 @@ function VolumeTile({ entry }: { entry: LibraryEntry }) {
 }
 
 export function SeriesCard({ group }: { group: SeriesGroup }) {
+  const linkState = getLibraryLinkState(useLocation());
   const update = useUpdateEntry();
   const { counts, total, next } = group;
   const inProgress = counts.reading;
@@ -119,7 +136,11 @@ export function SeriesCard({ group }: { group: SeriesGroup }) {
       {next && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
           <span className="text-muted-foreground">Als Nächstes:</span>
-          <Link to={`/books/${next.id}`} className="min-w-0 truncate font-medium hover:text-primary">
+          <Link
+            to={`/books/${next.id}`}
+            state={linkState}
+            className="min-w-0 truncate font-medium hover:text-primary"
+          >
             {next.book.seriesNumber !== null
               ? `Band ${formatSeriesNumber(next.book.seriesNumber)} – `
               : ''}

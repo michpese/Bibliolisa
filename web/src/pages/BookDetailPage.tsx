@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, Pencil, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -33,11 +33,26 @@ import {
   formatDate,
   formatSeriesNumber,
 } from '@/lib/format';
+import {
+  getLastLibraryUrl,
+  type LibraryNavigationState,
+} from '@/lib/libraryNavigation';
 import { buildSeriesGroup } from '@/lib/series';
 
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
+  const locationState = location.state as LibraryNavigationState | null;
+  const backToLibrary =
+    locationState?.fromLibrary && locationState.fromLibrary.startsWith('/')
+      ? locationState.fromLibrary
+      : getLastLibraryUrl();
+  const backLinkState: LibraryNavigationState = { restoreScroll: true };
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [id]);
   const queryClient = useQueryClient();
   const entryQuery = useEntry(id);
   const entry = entryQuery.data;
@@ -92,7 +107,9 @@ export function BookDetailPage() {
             : errorMessage(entryQuery.error)}
         </p>
         <Button asChild variant="outline">
-          <Link to="/">Zur Bibliothek</Link>
+          <Link to={backToLibrary} state={backLinkState}>
+            Zur Bibliothek
+          </Link>
         </Button>
       </div>
     );
@@ -127,7 +144,7 @@ export function BookDetailPage() {
             },
           },
         });
-        navigate('/', { replace: true });
+        navigate(backToLibrary, { replace: true, state: backLinkState });
       },
       onError: (error) => toast.error(errorMessage(error)),
     });
@@ -146,7 +163,7 @@ export function BookDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-2">
         <Button asChild variant="ghost" size="sm">
-          <Link to="/">
+          <Link to={backToLibrary} state={backLinkState}>
             <ArrowLeft className="h-4 w-4" /> Bibliothek
           </Link>
         </Button>

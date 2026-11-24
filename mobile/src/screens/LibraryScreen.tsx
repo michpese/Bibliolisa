@@ -44,6 +44,7 @@ import {
   STATUS_ORDER,
   STATUS_SHORT_LABELS,
 } from '../utils/format';
+import { useBottomSafePadding } from '../utils/safe-area';
 
 type LibraryNavProp = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'LibraryTab'>,
@@ -52,6 +53,7 @@ type LibraryNavProp = CompositeNavigationProp<
 
 export function LibraryScreen() {
   const theme = useAppTheme();
+  const modalBottomPadding = useBottomSafePadding(12);
   const navigation = useNavigation<LibraryNavProp>();
   const {
     db,
@@ -202,11 +204,11 @@ export function LibraryScreen() {
     >
       {/* Kopfzeile */}
       <View style={styles.topHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.screenTitle, { color: theme.text }]}>
+        <View style={styles.headerTitleWrap}>
+          <Text numberOfLines={1} style={[styles.screenTitle, { color: theme.text }]}>
             Bibliolisa
           </Text>
-          <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
+          <Text numberOfLines={2} style={[styles.screenSubtitle, { color: theme.textMuted }]}>
             {facets?.total ?? 0} {(facets?.total ?? 0) === 1 ? 'Buch' : 'Bücher'}
             {pendingChangesCount > 0
               ? ` · ${pendingChangesCount} lokal vorgemerkt`
@@ -596,6 +598,8 @@ export function LibraryScreen() {
         visible={sortModalVisible}
         transparent
         animationType="fade"
+        statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={() => setSortModalVisible(false)}
       >
         <Pressable
@@ -605,7 +609,11 @@ export function LibraryScreen() {
           <Pressable
             style={[
               styles.modalSheet,
-              { backgroundColor: theme.card, borderColor: theme.border },
+              {
+                backgroundColor: theme.card,
+                borderColor: theme.border,
+                marginBottom: modalBottomPadding,
+              },
             ]}
             onPress={() => undefined}
           >
@@ -656,13 +664,19 @@ export function LibraryScreen() {
         visible={filterModalVisible}
         transparent
         animationType="slide"
+        statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={() => setFilterModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
           <View
             style={[
               styles.filterSheet,
-              { backgroundColor: theme.card, borderColor: theme.border },
+              {
+                backgroundColor: theme.card,
+                borderColor: theme.border,
+                paddingBottom: modalBottomPadding,
+              },
             ]}
           >
             <View style={styles.filterHeader}>
@@ -925,10 +939,15 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 10,
   },
+  headerTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   syncAlertBanner: {
     flexDirection: 'row',
@@ -1184,7 +1203,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   filterSheet: {
-    maxHeight: '80%',
+    maxHeight: '85%',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderWidth: 1,

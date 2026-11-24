@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigationType, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownAZ,
   ArrowUpAZ,
@@ -35,6 +35,12 @@ import {
   STATUS_ORDER,
   STATUS_STYLES,
 } from '@/lib/format';
+import {
+  getSavedLibraryScroll,
+  saveLibraryScroll,
+  saveLibrarySearch,
+  type LibraryNavigationState,
+} from '@/lib/libraryNavigation';
 import { groupBySeries } from '@/lib/series';
 import { cn } from '@/lib/utils';
 
@@ -58,7 +64,12 @@ const VIEW_OPTIONS: Array<{ value: ViewMode; label: string; icon: typeof Layers 
 ];
 
 export function LibraryPage() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
   const [params, setParams] = useSearchParams();
+  const locationState = location.state as LibraryNavigationState | null;
+  const shouldRestoreScroll =
+    navigationType === 'POP' || Boolean(locationState?.restoreScroll);
   const [view, setViewState] = useState<ViewMode>(readView);
   const [addOpen, setAddOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -108,7 +119,7 @@ export function LibraryPage() {
   // Live-Suche: debounced Text -> URL-Parameter
   useEffect(() => {
     const trimmed = debouncedQ.trim();
-    if (trimmed !== urlQ) {
+    if (trimmed !== urlQ.trim()) {
       updateParam('q', trimmed || undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,6 +129,11 @@ export function LibraryPage() {
   useEffect(() => {
     setSearchText((prev) => (prev.trim() === urlQ ? prev : urlQ));
   }, [urlQ]);
+
+  // Aktuelle Query für Rückkehr aus der Buchdetailseite sichern
+  useEffect(() => {
+    saveLibrarySearch(location.search);
+  }, [location.search]);
 
   const filters: LibraryFilters = useMemo(
     () => ({
@@ -135,6 +151,97 @@ export function LibraryPage() {
 
   const library = useLibraryAll(filters);
   const facets = useFacets();
+
+  const lastKnownScrollYRef = useRef(0);
+  const restoredLocationKeyRef = useRef<string | null>(null);
+  const isRestoringScrollRef = useRef(false);
+
+  // Laufendes Scroll-Tracking pro Bibliotheks-Query (mit rAF-Throttling)
+  useEffect(() => {
+    const currentSearch = location.search;
+    if (!shouldRestoreScroll && navigationType === 'REPLACE') {
+      lastKnownScrollYRef.current = window.scrollY;
+      saveLibraryScroll(currentSearch, window.scrollY);
+    }
+
+    let rafId: number | null = null;
+    const recordScroll = () => {
+      if (
+        isRestoringScrollRef.current ||
+        (shouldRestoreScroll && restoredLocationKeyRef.current !== location.key)
+      ) {
+        return;
+      }
+      const y = window.scrollY;
+      lastKnownScrollYRef.current = y;
+      saveLibraryScroll(currentSearch, y);
+    };
+
+    const handleScroll = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        recordScroll();
+      });
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+    };
+  }, [location.key, location.search, navigationType, shouldRestoreScroll]);
+
+  // Scroll-Position bei Rückkehr (POP oder <- Bibliothek) einmalig wiederherstellen
+  useLayoutEffect(() => {
+    if (restoredLocationKeyRef.current === location.key) {
+      return;
+    }
+    if (!shouldRestoreScroll) {
+      restoredLocationKeyRef.current = location.key;
+      if (navigationType === 'PUSH') {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        lastKnownScrollYRef.current = 0;
+      }
+      return;
+    }
+    if (library.isLoading || library.data === undefined) {
+      return;
+    }
+    const savedY = getSavedLibraryScroll(location.search);
+    if (savedY === null) {
+      restoredLocationKeyRef.current = location.key;
+      return;
+    }
+
+    isRestoringScrollRef.current = true;
+    window.scrollTo({ top: savedY, left: 0, behavior: 'instant' });
+    lastKnownScrollYRef.current = savedY;
+
+    let cancelled = false;
+    const rafId = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      window.scrollTo({ top: savedY, left: 0, behavior: 'instant' });
+      lastKnownScrollYRef.current = savedY;
+      restoredLocationKeyRef.current = location.key;
+      isRestoringScrollRef.current = false;
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+      isRestoringScrollRef.current = false;
+    };
+  }, [
+    library.data,
+    library.isLoading,
+    location.key,
+    location.search,
+    navigationType,
+    shouldRestoreScroll,
+  ]);
 
   const items = library.data?.items ?? [];
   const grouped = useMemo(() => groupBySeries(items), [items]);

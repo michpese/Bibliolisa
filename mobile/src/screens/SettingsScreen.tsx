@@ -529,7 +529,7 @@ export function SettingsScreen() {
             { backgroundColor: theme.card, borderColor: theme.border },
           ]}
         >
-          <View style={styles.cardHeaderRow}>
+          <View style={styles.cardHeaderStack}>
             <Text style={[styles.cardTitle, { color: theme.text }]}>
               Synchronisation & Gerätestatus
             </Text>
@@ -772,11 +772,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 10,
   },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  cardHeaderStack: {
     gap: 8,
+    alignItems: 'flex-start',
   },
   cardTitle: {
     fontSize: 16,

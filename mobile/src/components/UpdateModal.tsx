@@ -26,6 +26,7 @@ import {
 } from '../services/app-updater-utils';
 import { useAppTheme } from '../theme';
 import { formatDate } from '../utils/format';
+import { useBottomSafePadding } from '../utils/safe-area';
 
 type UpdatePhase =
   | 'idle'
@@ -36,6 +37,7 @@ type UpdatePhase =
 
 export function UpdateModal() {
   const theme = useAppTheme();
+  const footerBottomPadding = useBottomSafePadding(12);
   const { pendingChangesCount } = useAppContext();
   const {
     currentVersion,
@@ -203,6 +205,8 @@ export function UpdateModal() {
       visible={modalVisible}
       transparent
       animationType="slide"
+      statusBarTranslucent
+      navigationBarTranslucent
       onRequestClose={handleClose}
     >
       <View style={styles.backdrop}>
@@ -376,7 +380,15 @@ export function UpdateModal() {
           </ScrollView>
 
           {/* Aktionsbereich */}
-          <View style={[styles.footer, { borderTopColor: theme.border }]}>
+          <View
+            style={[
+              styles.footer,
+              {
+                borderTopColor: theme.border,
+                paddingBottom: footerBottomPadding,
+              },
+            ]}
+          >
             {phase === 'idle' && (
               <>
                 {canInstallApk ? (

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import type { LibraryEntry } from '@bibliolisa/shared';
 import { Badge } from '@/components/ui/misc';
 import { BookCover } from '@/components/BookCover';
@@ -10,6 +10,7 @@ import {
   formatAuthors,
   formatSeriesLabel,
 } from '@/lib/format';
+import type { LibraryNavigationState } from '@/lib/libraryNavigation';
 import { cn } from '@/lib/utils';
 
 interface BookItemProps {
@@ -18,12 +19,21 @@ interface BookItemProps {
 
 /** Karte für die Grid-Ansicht. */
 export function BookCard({ entry }: BookItemProps) {
+  const location = useLocation();
+  const linkState: LibraryNavigationState | undefined =
+    location.pathname === '/'
+      ? { fromLibrary: `${location.pathname}${location.search}` }
+      : undefined;
   const { book } = entry;
   const series = formatSeriesLabel(book);
 
   return (
     <article className="group flex flex-col gap-2 rounded-xl border bg-card p-2.5 shadow-sm transition-shadow hover:shadow-md">
-      <Link to={`/books/${entry.id}`} className="flex flex-col gap-2 rounded-md">
+      <Link
+        to={`/books/${entry.id}`}
+        state={linkState}
+        className="flex flex-col gap-2 rounded-md"
+      >
         <div className="relative">
           <BookCover coverKey={book.coverKey} title={book.title} />
           <Badge
@@ -59,12 +69,21 @@ export function BookCard({ entry }: BookItemProps) {
 
 /** Kompakte Zeile für die Listenansicht. */
 export function BookRow({ entry }: BookItemProps) {
+  const location = useLocation();
+  const linkState: LibraryNavigationState | undefined =
+    location.pathname === '/'
+      ? { fromLibrary: `${location.pathname}${location.search}` }
+      : undefined;
   const { book } = entry;
   const series = formatSeriesLabel(book);
 
   return (
     <article className="flex items-center gap-3 rounded-xl border bg-card p-2.5 shadow-sm transition-shadow hover:shadow-md">
-      <Link to={`/books/${entry.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-md">
+      <Link
+        to={`/books/${entry.id}`}
+        state={linkState}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-md"
+      >
         <BookCover coverKey={book.coverKey} title={book.title} className="w-12 shrink-0" />
         <div className="min-w-0">
           <h3 className="line-clamp-1 text-sm font-semibold">{book.title}</h3>

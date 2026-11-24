@@ -17,6 +17,7 @@ import { useSyncContext } from '../sync/sync-context';
 import type { SyncStatus } from '../sync/sync-engine';
 import { useAppTheme, type AppTheme } from '../theme';
 import { formatDateTime, formatRelativeSyncTime } from '../utils/format';
+import { useBottomSafePadding } from '../utils/safe-area';
 
 interface SyncStatusBadgeProps {
   compact?: boolean;
@@ -114,6 +115,7 @@ export function SyncStatusBadge({
   onOpenSettings,
 }: SyncStatusBadgeProps) {
   const theme = useAppTheme();
+  const sheetBottomPadding = useBottomSafePadding(12);
   const { session, serverUrl, signIn } = useAppContext();
   const { snapshot, syncNow } = useSyncContext();
 
@@ -213,6 +215,8 @@ export function SyncStatusBadge({
         visible={modalVisible}
         transparent
         animationType="slide"
+        statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={() => setModalVisible(false)}
       >
         <KeyboardAvoidingView
@@ -226,7 +230,11 @@ export function SyncStatusBadge({
             <Pressable
               style={[
                 styles.sheet,
-                { backgroundColor: theme.card, borderColor: theme.border },
+                {
+                  backgroundColor: theme.card,
+                  borderColor: theme.border,
+                  paddingBottom: sheetBottomPadding,
+                },
               ]}
               onPress={() => undefined}
             >
@@ -459,6 +467,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+    maxWidth: '100%',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
@@ -469,6 +478,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   pillText: {
+    flexShrink: 1,
     fontSize: 12,
     fontWeight: '700',
   },

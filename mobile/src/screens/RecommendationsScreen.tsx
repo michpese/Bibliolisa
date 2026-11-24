@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +28,7 @@ import {
 } from '../db/library.repo';
 import type { LocalLibraryEntry } from '../db/types';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
+import { useSyncContext } from '../sync/sync-context';
 import { useAppTheme } from '../theme';
 import {
   formatAuthors,
@@ -77,10 +79,18 @@ const CATEGORY_META: Array<{
   },
 ];
 
+function formatTimeHms(date: Date): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  const s = String(date.getSeconds()).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
 export function RecommendationsScreen() {
   const theme = useAppTheme();
   const navigation = useNavigation<RecNavProp>();
   const { db, userId, libraryVersion, notifyDataChanged } = useAppContext();
+  const { snapshot: syncSnapshot, syncNow } = useSyncContext();
 
   const [seed, setSeed] = useState<number | undefined>(undefined);
   const [result, setResult] = useState<RecommendationResult | null>(null);
@@ -88,22 +98,45 @@ export function RecommendationsScreen() {
     Map<string, LocalLibraryEntry>
   >(new Map());
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastReloadedAt, setLastReloadedAt] = useState<Date | null>(null);
+  const [feedbackText, setFeedbackText] = useState<string | null>(null);
 
-  const compute = useCallback(async () => {
-    if (!db || !userId) return;
-    const entries = await listAllActiveLocalEntries(db, userId);
-    const entryMap = new Map<string, LocalLibraryEntry>();
-    for (const e of entries) {
-      entryMap.set(e.id, e);
-    }
-    const computed = generateRecommendations(entries, {
-      limitPerCategory: 5,
-      seed,
-      includeEntry: true,
-    });
-    setLocalEntriesById(entryMap);
-    setResult(computed);
-  }, [db, seed, userId]);
+  const mountedRef = useRef(true);
+  const refreshingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (feedbackTimerRef.current) {
+        clearTimeout(feedbackTimerRef.current);
+        feedbackTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const compute = useCallback(
+    async (overrideSeed?: number) => {
+      if (!db || !userId) return;
+      const entries = await listAllActiveLocalEntries(db, userId);
+      const entryMap = new Map<string, LocalLibraryEntry>();
+      for (const e of entries) {
+        entryMap.set(e.id, e);
+      }
+      const effectiveSeed = overrideSeed ?? seed;
+      const computed = generateRecommendations(entries, {
+        limitPerCategory: 5,
+        seed: effectiveSeed,
+        includeEntry: true,
+      });
+      if (!mountedRef.current) return;
+      setLocalEntriesById(entryMap);
+      setResult(computed);
+    },
+    [db, seed, userId]
+  );
 
   useEffect(() => {
     let active = true;
@@ -118,6 +151,63 @@ export function RecommendationsScreen() {
       active = false;
     };
   }, [compute, libraryVersion]);
+
+  const handleReload = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+
+    if (feedbackTimerRef.current) {
+      clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+    }
+
+    const startedAt = Date.now();
+    try {
+      if (syncSnapshot.isConfigured && syncSnapshot.isAuthenticated) {
+        try {
+          await syncNow('pull_to_refresh');
+        } catch {
+          // Offline-Fallback: lokale Empfehlungen trotzdem neu berechnen
+        }
+      }
+
+      let nextSeed = Math.floor(Math.random() * 1_000_000_000);
+      if (nextSeed === seed) {
+        nextSeed = (nextSeed + 1) % 1_000_000_000;
+      }
+      if (!mountedRef.current) return;
+      setSeed(nextSeed);
+      await compute(nextSeed);
+
+      const remaining = 300 - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+      }
+      if (!mountedRef.current) return;
+
+      const now = new Date();
+      setLastReloadedAt(now);
+      setFeedbackText(`Empfehlungen aktualisiert (${formatTimeHms(now)})`);
+      feedbackTimerRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setFeedbackText(null);
+        }
+        feedbackTimerRef.current = null;
+      }, 2500);
+    } finally {
+      refreshingRef.current = false;
+      if (mountedRef.current) {
+        setRefreshing(false);
+      }
+    }
+  }, [
+    compute,
+    seed,
+    syncNow,
+    syncSnapshot.isAuthenticated,
+    syncSnapshot.isConfigured,
+  ]);
 
   const handleStartReading = async (item: RecommendationItem) => {
     if (!db || !userId) return;
@@ -141,26 +231,68 @@ export function RecommendationsScreen() {
       edges={['top']}
       style={[styles.container, { backgroundColor: theme.background }]}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void handleReload()}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
+          />
+        }
+      >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.screenTitle, { color: theme.text }]}>
               Was lese ich als Nächstes?
             </Text>
             <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
-              Vorschläge aus deinem ungelesenen Stapel – auch komplett offline.
+              {lastReloadedAt
+                ? `Vorschläge aus deinem ungelesenen Stapel · Stand ${formatTimeHms(lastReloadedAt)}`
+                : 'Vorschläge aus deinem ungelesenen Stapel – auch komplett offline.'}
             </Text>
           </View>
           <Pressable
-            onPress={() => void compute()}
-            style={[
+            onPress={() => void handleReload()}
+            disabled={refreshing}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Empfehlungen neu laden"
+            style={({ pressed }) => [
               styles.refreshBtn,
-              { backgroundColor: theme.card, borderColor: theme.border },
+              {
+                backgroundColor: theme.card,
+                borderColor: theme.border,
+                opacity: pressed ? 0.65 : refreshing ? 0.8 : 1,
+              },
             ]}
           >
-            <Ionicons name="refresh" size={18} color={theme.primary} />
+            {refreshing ? (
+              <ActivityIndicator size="small" color={theme.primary} />
+            ) : (
+              <Ionicons name="refresh" size={18} color={theme.primary} />
+            )}
           </Pressable>
         </View>
+
+        {feedbackText && (
+          <View
+            accessibilityLiveRegion="polite"
+            style={[
+              styles.feedbackBanner,
+              {
+                backgroundColor: theme.successSoft,
+                borderColor: theme.success,
+              },
+            ]}
+          >
+            <Ionicons name="checkmark-circle" size={16} color={theme.success} />
+            <Text style={[styles.feedbackText, { color: theme.success }]}>
+              {feedbackText}
+            </Text>
+          </View>
+        )}
 
         {loading ? (
           <View style={styles.centered}>
@@ -216,11 +348,20 @@ export function RecommendationsScreen() {
                   {cat.key === 'surprise_me' && (
                     <Pressable
                       onPress={() =>
-                        setSeed(Math.floor(Math.random() * 1_000_000_000))
+                        setSeed((prev) => {
+                          let next = Math.floor(Math.random() * 1_000_000_000);
+                          if (next === prev) {
+                            next = (next + 1) % 1_000_000_000;
+                          }
+                          return next;
+                        })
                       }
-                      style={[
+                      style={({ pressed }) => [
                         styles.diceBtn,
-                        { backgroundColor: theme.accent },
+                        {
+                          backgroundColor: theme.accent,
+                          opacity: pressed ? 0.65 : 1,
+                        },
                       ]}
                     >
                       <Ionicons
@@ -383,6 +524,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  feedbackBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: -6,
+  },
+  feedbackText: {
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: '700',
   },
   centered: {
     paddingVertical: 48,
