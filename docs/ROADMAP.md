@@ -291,3 +291,11 @@ Verifikation (ausgeführt, grün):
 - **Enhancement `#2` (Mobile):** Themengerechtes *„Buch gespeichert“*-Popup in `mobile/src/screens/AddBookScreen.tsx` mit Primäroption **„Noch ein Buch hinzufügen“** inkl. Rückkehr zum Seitenanfang.
 - **Enhancement `#6` (Shared / Server / Web / Mobile):** Geräte-Sync-Tracking in `sync_devices` (Drizzle-Migration `0001_sync_devices.sql`), authentifizierter & `user_id`-isolierter Endpunkt `GET /api/sync/status`, `WebSyncBadge` auf der Web-Bibliotheksseite und `Synchronisation`-Karte mit manuellem Sync-Button in `web/src/pages/SettingsPage.tsx`.
 - **Tests, Doku & Release:** Aktualisierte `docs/ARCHITECTURE.md`, Integrationstests in `server/tests/sync.test.ts`, Changelog-Tests in `mobile/tests/app-updater.test.ts` sowie Release-Vorbereitung für `v0.3.0` (`versionCode 30099`) in `CHANGELOG.md` und allen Workspace-Manifesten.
+
+---
+
+## Nach-Phase-5: Sync-Geräte-Bereinigung (`v0.3.1`)
+
+- **Geister-Sessions behoben (`server`):** `GET /api/sync/status` filtert auf `replaced_by_id IS NULL` und `DELETE /api/auth/sessions/:sessionId` widerruft die komplette Rotationskette, sodass alte/rotierte Android-Sessions den Sync-Status nicht mehr blockieren.
+- **Geräte-Entfernung (`shared`, `server`, `web`):** Authentifizierter & `user_id`-isolierter Endpunkt `DELETE /api/sync/devices/:deviceId` (`SyncDeviceIdParamSchema`) sowie gekürzte Geräte-IDs und Entfernen-Buttons mit Inline-Bestätigung in `SettingsPage.tsx` und `WebSyncBadge.tsx`.
+- **Tests, Doku & Release:** `docs/ARCHITECTURE.md`, Regressionstests in `server/tests/sync.test.ts`, Changelog-Check in `mobile/tests/app-updater.test.ts` sowie Patch-Release `v0.3.1` (`versionCode 30199`).

@@ -6,6 +6,33 @@ Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1
 
 ---
 
+## [0.3.1] - 2026-11-24
+
+### ✨ Highlights
+
+- **Bereinigte Sync-Geräteliste & direkte Geräte-Entfernung:** Rotierte oder bereits abgemeldete Alt-Sessions der Android-App blockieren den Webapp-Sync-Status (*„Handy nicht gesynct“*) nicht mehr, und verwaiste oder doppelt vorhandene Mobilgeräte lassen sich direkt in der Webapp entfernen.
+
+### 🐛 Fehlerbehebungen
+
+- **Rotierte Mobile-Sessions (`server`):** `GET /api/sync/status` filtert mobile Sessions jetzt konsistent mit `replaced_by_id IS NULL`, sodass nach Token-Rotation keine abgelösten Vorgänger-Tokens mehr als aktive zweite Handy-Sitzung gezählt werden.
+- **Vollständiger Session-Widerruf (`server`):** `DELETE /api/auth/sessions/:sessionId` widerruft nun atomar die gesamte Rotationskette einer Sitzung statt nur des jeweils jüngsten Tokens.
+
+### 🚀 Verbesserungen
+
+- **Neuer Endpunkt `DELETE /api/sync/devices/:deviceId` (`shared`, `server`):** Entfernt ein Gerät aus `sync_devices`, widerruft ggf. zugehörige aktive Mobile-Refresh-Tokens inklusive Rotationskette (strikt auf `request.user.id` isoliert) und wird durch `SyncDeviceIdParamSchema` validiert.
+- **Geräte-Entfernung & ID-Anzeige in der Webapp (`web`):** In **Einstellungen → Synchronisation** sowie im **Sync-Status-Dialog** (`WebSyncBadge`) wird eine gekürzte Geräte-ID (`ID: …`) angezeigt, um gleich benannte `Bibliolisa Android`-Geräte zu unterscheiden; über das Papierkorb-Symbol mit Inline-Bestätigung lassen sich alte oder aktive Mobilgeräte direkt entfernen.
+
+### 📚 Dokumentation & Tests
+
+- **Architektur- & Roadmap-Abgleich (`docs/ARCHITECTURE.md`, `docs/ROADMAP.md`):** `DELETE /api/sync/devices/:deviceId` in der REST-Spezifikation ergänzt.
+- **Automatisierte Tests (`server` & `mobile`):** Regressionstest für rotierte/widerrufene Sessions sowie Integrationstests für `DELETE /api/sync/devices/:deviceId` (Auth `401`, aktive/abgemeldete Geräte, `never_synced` → `synced`, `404` & Multi-User-Isolation) in `server/tests/sync.test.ts`; Changelog-Prüfung für `v0.3.1` in `mobile/tests/app-updater.test.ts` ergänzt.
+
+### 💾 Hinweis zum Update
+
+Für den Server ist keine neue Datenbankmigration erforderlich; bestehende SQLite-Instanzen können direkt aktualisiert werden. Bestehende Android-Installationen ab `v0.2.0` (mit demselben Release-Keystore) können das Update nahtlos über **Einstellungen → App-Updates** einspielen; alle lokalen Bücher, Cover, Notizen, Bewertungen und Sync-Einstellungen bleiben vollständig erhalten.
+
+---
+
 ## [0.3.0] - 2026-11-24
 
 ### ✨ Highlights

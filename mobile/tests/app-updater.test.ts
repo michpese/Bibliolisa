@@ -349,6 +349,17 @@ describe('GitHub-Release-Parsing & Update-Check', () => {
     const changelogPath = path.resolve(__dirname, '..', '..', 'CHANGELOG.md');
     const changelogMd = fs.readFileSync(changelogPath, 'utf8');
 
+    const sec031 = extractChangelogSection(changelogMd, 'v0.3.1');
+    expect(sec031).toContain('### ✨ Highlights');
+    expect(sec031).toContain('Bereinigte Sync-Geräteliste');
+    expect(sec031).toContain('DELETE /api/sync/devices/:deviceId');
+    expect(sec031).not.toContain('## [0.3.0]');
+    expect(extractChangelogSection(changelogMd, '0.3.1')).toBe(sec031);
+
+    const blocks031 = formatReleaseNotesForDisplay(sec031);
+    expect(blocks031.some((block) => block.type === 'heading')).toBe(true);
+    expect(blocks031.some((block) => block.type === 'bullet')).toBe(true);
+
     const sec030 = extractChangelogSection(changelogMd, 'v0.3.0');
     expect(sec030).toContain('### ✨ Highlights');
     expect(sec030).toContain('Webapp-Sync-Anzeige');

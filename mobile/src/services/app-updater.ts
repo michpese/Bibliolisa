@@ -40,7 +40,7 @@ export function getInstalledAppInfo(): InstalledAppInfo {
   const version =
     Application.nativeApplicationVersion?.trim() ||
     appConfig.expo.version ||
-    '0.3.0';
+    '0.3.1';
   const buildCode =
     Application.nativeBuildVersion?.trim() ||
     (appConfig.expo.android?.versionCode
